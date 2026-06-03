@@ -1,56 +1,73 @@
 package config
 
+import "time"
+
 // Config 应用配置结构体
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Milvus   MilvusConfig   `yaml:"milvus"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	MCP      MCPConfig      `yaml:"mcp"`
+	App      AppConfig      `mapstructure:"app"`
+	Database DatabaseConfig `mapstructure:"database"`
+	JWT      JWTConfig      `mapstructure:"jwt"`
+	Log      LogConfig      `mapstructure:"log"`
+	CORS     CORSConfig     `mapstructure:"cors"`
 }
 
-// ServerConfig 服务器配置
-type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+// AppConfig 应用配置
+type AppConfig struct {
+	Name    string `mapstructure:"name"`
+	Version string `mapstructure:"version"`
+	Mode    string `mapstructure:"mode"` // debug, release, test
+	Port    int    `mapstructure:"port"`
 }
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
-	Host      string `yaml:"host"`
-	Port      int    `yaml:"port"`
-	User      string `yaml:"user"`
-	Password  string `yaml:"password"`
-	DBName    string `yaml:"dbname"`
-	Charset   string `yaml:"charset"`
-	ParseTime bool   `yaml:"parse_time"`
-	Loc       string `yaml:"loc"`
+	MySQL MySQLConfig `mapstructure:"mysql"`
+	Redis RedisConfig `mapstructure:"redis"`
+}
+
+// MySQLConfig MySQL 配置
+type MySQLConfig struct {
+	Host         string `mapstructure:"host"`
+	Port         int    `mapstructure:"port"`
+	Username     string `mapstructure:"username"`
+	Password     string `mapstructure:"password"`
+	Database     string `mapstructure:"database"`
+	MaxIdleConns int    `mapstructure:"max_idle_conns"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"`
 }
 
 // RedisConfig Redis 配置
 type RedisConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
-}
-
-// MilvusConfig Milvus 向量数据库配置
-type MilvusConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	PoolSize int    `mapstructure:"pool_size"`
 }
 
 // JWTConfig JWT 配置
 type JWTConfig struct {
-	Secret          string `yaml:"secret"`
-	AccessTokenExp  string `yaml:"access_token_exp"`  // Access Token 过期时间，如 "15m"
-	RefreshTokenExp string `yaml:"refresh_token_exp"` // Refresh Token 过期时间，如 "168h"（7天）
-	Issuer          string `yaml:"issuer"`            // Token 签发者
+	Secret      string        `mapstructure:"secret"`
+	ExpireHours time.Duration `mapstructure:"expire_hours"`
 }
 
-// MCPConfig MCP Server 配置
-type MCPConfig struct {
-	MarkItDownURL string `yaml:"markitdown_url"`
+// LogConfig 日志配置
+type LogConfig struct {
+	Level      string `mapstructure:"level"`       // debug, info, warn, error
+	Filename   string `mapstructure:"filename"`    // 日志文件路径
+	MaxSize    int    `mapstructure:"max_size"`    // 单个日志文件最大大小(MB)
+	MaxBackups int    `mapstructure:"max_backups"` // 保留的旧日志文件数量
+	MaxAge     int    `mapstructure:"max_age"`     // 保留旧日志文件的最大天数
+	Compress   bool   `mapstructure:"compress"`    // 是否压缩
+}
+
+// CORSConfig CORS 配置
+type CORSConfig struct {
+	Enabled          bool     `mapstructure:"enabled"`
+	AllowOrigins     []string `mapstructure:"allow_origins"`
+	AllowMethods     []string `mapstructure:"allow_methods"`
+	AllowHeaders     []string `mapstructure:"allow_headers"`
+	ExposeHeaders    []string `mapstructure:"expose_headers"`
+	AllowCredentials bool     `mapstructure:"allow_credentials"`
+	MaxAge           int      `mapstructure:"max_age"`
 }
