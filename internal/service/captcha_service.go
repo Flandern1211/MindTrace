@@ -24,7 +24,7 @@ const (
 	captchaWidth     = 300             // 背景图宽度
 	captchaHeight    = 150             // 背景图高度
 	sliderSize       = 40              // 滑块大小
-	captchaTolerance = 10              // 容差像素
+	captchaTolerance = 5               // 容差像素
 )
 
 // captchaService 验证码服务实现
