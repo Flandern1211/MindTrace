@@ -125,13 +125,15 @@ func (a *App) initDatabase() error {
 func (a *App) initDependencies() {
 	// 创建 Repository
 	userRepo := repository.NewUserRepository(a.mysqlDB)
+	sourceRepo := repository.NewSourceRepository(a.mysqlDB)
 
 	// 创建 Service
 	userSvc := service.NewUserService(userRepo)
 	authSvc := service.NewAuthService(userRepo, userSvc)
+	sourceSvc := service.NewSourceService(sourceRepo)
 
 	// 创建 Router
-	a.router = api.NewRouter(userSvc, authSvc)
+	a.router = api.NewRouter(userSvc, authSvc, sourceSvc)
 }
 
 // initRouter 初始化路由
