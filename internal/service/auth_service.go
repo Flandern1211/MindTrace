@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	maxLoginAttempts = 3                // 最大登录失败次数
-	lockDuration     = 15 * time.Minute // 锁定时长 15 分钟
+	maxLoginAttempts = 3               // 最大登录失败次数
+	lockDuration     = 3 * time.Minute // 锁定时长 15 分钟
 )
 
 // authService 认证服务实现
