@@ -13,13 +13,3 @@ type BaseEntity struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
-
-// BeforeCreate GORM hook - 创建前
-func (b *BaseEntity) BeforeCreate(tx *gorm.DB) error {
-	return nil
-}
-
-// BeforeUpdate GORM hook - 更新前
-func (b *BaseEntity) BeforeUpdate(tx *gorm.DB) error {
-	return nil
-}
