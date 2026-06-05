@@ -445,6 +445,128 @@ POST /api/v1/auth/reset-password
 
 ---
 
+## 8. 上传头像
+
+上传用户头像，支持 jpg/jpeg/png 格式，最大 2MB。同一用户重复上传会自动覆盖旧头像文件。
+
+**请求**
+
+```
+POST /api/v1/user/avatar
+Content-Type: multipart/form-data
+Authorization: Bearer <access_token>
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| avatar | file | ✅ | 头像文件（jpg/jpeg/png，≤ 2MB） |
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "成功",
+  "data": {
+    "avatar": "/uploads/avatars/1.jpg"
+  }
+}
+```
+
+> 头像 URL 格式：`/uploads/avatars/{user_id}.{ext}`，可通过 `GET /uploads/avatars/{user_id}.{ext}` 访问。
+
+**错误场景**
+
+| code | message | 原因 |
+|------|---------|------|
+| 400 | 请上传头像文件 | 未选择文件 |
+| 400 | 头像文件大小不能超过 2MB | 文件过大 |
+| 400 | 仅支持 jpg/jpeg/png 格式 | 文件格式不支持 |
+
+---
+
+## 9. 修改用户名
+
+修改当前登录用户的用户名。
+
+**请求**
+
+```
+PUT /api/v1/user/username
+Authorization: Bearer <access_token>
+```
+
+```json
+{
+  "username": "new_username"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| username | string | ✅ | 新用户名，3-50 位 |
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "成功",
+  "data": null
+}
+```
+
+**错误场景**
+
+| code | message | 原因 |
+|------|---------|------|
+| 1002 | 用户名已被使用 | 该用户名已存在 |
+
+---
+
+## 10. 修改密码
+
+修改当前登录用户的密码。修改成功后，当前 token 会失效，需要重新登录。
+
+**请求**
+
+```
+POST /api/v1/user/password
+Authorization: Bearer <access_token>
+```
+
+```json
+{
+  "old_password": "oldPass123",
+  "new_password": "newPass456"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| old_password | string | ✅ | 当前密码 |
+| new_password | string | ✅ | 新密码，8-20 位 |
+
+**成功响应**
+
+```json
+{
+  "code": 0,
+  "message": "成功",
+  "data": {
+    "message": "密码修改成功，请重新登录"
+  }
+}
+```
+
+**错误场景**
+
+| code | message | 原因 |
+|------|---------|------|
+| 1003 | 邮箱或密码错误 | 旧密码不正确 |
+
+---
+
 ## Token 使用说明
 
 ### 双 Token 机制
