@@ -5,10 +5,17 @@ import (
 	dto "YoudaoNoteLm/internal/model/dto/response"
 	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/repository"
+	"YoudaoNoteLm/pkg/logger"
 	"YoudaoNoteLm/pkg/response"
 	"context"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
 
 	bizerrors "YoudaoNoteLm/pkg/errors"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -106,6 +113,97 @@ func (s *userService) UpdateUser(id uint, req *request.UpdateUserRequest) error 
 	return s.userRepo.Update(user)
 }
 
+// UpdateUsername 修改用户名
+func (s *userService) UpdateUsername(id uint, req *request.UpdateUsernameRequest) error {
+	user, err := s.GetUserByID(id)
+	if err != nil {
+		return err
+	}
+
+	// 检查用户名是否已被使用
+	exists, err := s.userRepo.ExistsByUsername(req.Username)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return bizerrors.New(bizerrors.CodeUserAlreadyExists, "用户名已被使用")
+	}
+
+	user.Username = req.Username
+	return s.userRepo.Update(user)
+}
+
+// UploadAvatar 上传头像
+func (s *userService) UploadAvatar(id uint, file *multipart.FileHeader) (string, error) {
+	// 验证文件大小（2MB）
+	if file.Size > 2*1024*1024 {
+		return "", bizerrors.New(bizerrors.CodeBadRequest, "头像文件大小不能超过 2MB")
+	}
+
+	// 验证文件类型
+	ext := filepath.Ext(file.Filename)
+	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+	if !allowedExts[ext] {
+		return "", bizerrors.New(bizerrors.CodeBadRequest, "仅支持 jpg/jpeg/png 格式")
+	}
+
+	// 获取用户信息（用于删除旧头像）
+	user, err := s.GetUserByID(id)
+	if err != nil {
+		return "", err
+	}
+
+	// 删除旧头像文件
+	if user.Avatar != "" {
+		oldPath := "." + user.Avatar // 转为相对路径
+		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+			logger.Warn("删除旧头像失败", zap.String("path", oldPath), zap.Error(err))
+		}
+	}
+
+	// 创建上传目录
+	uploadDir := "uploads/avatars"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		logger.Error("创建上传目录失败", zap.Error(err))
+		return "", fmt.Errorf("创建上传目录失败: %w", err)
+	}
+
+	// 生成文件名：{user_id}.{ext}
+	filename := fmt.Sprintf("%d%s", id, ext)
+	savePath := filepath.Join(uploadDir, filename)
+
+	// 打开上传文件
+	src, err := file.Open()
+	if err != nil {
+		logger.Error("打开上传文件失败", zap.Error(err))
+		return "", fmt.Errorf("打开上传文件失败: %w", err)
+	}
+	defer src.Close()
+
+	// 创建目标文件
+	dst, err := os.Create(savePath)
+	if err != nil {
+		logger.Error("创建目标文件失败", zap.Error(err))
+		return "", fmt.Errorf("创建目标文件失败: %w", err)
+	}
+	defer dst.Close()
+
+	// 复制文件内容
+	if _, err := io.Copy(dst, src); err != nil {
+		logger.Error("保存头像文件失败", zap.Error(err))
+		return "", fmt.Errorf("保存头像文件失败: %w", err)
+	}
+
+	// 更新用户头像 URL
+	avatarURL := fmt.Sprintf("/uploads/avatars/%s", filename)
+	user.Avatar = avatarURL
+	if err := s.userRepo.Update(user); err != nil {
+		return "", err
+	}
+
+	return avatarURL, nil
+}
+
 // ChangePassword 修改密码
 func (s *userService) ChangePassword(id uint, req *request.ChangePasswordRequest) error {
 	user, err := s.GetUserByID(id)
@@ -126,6 +224,36 @@ func (s *userService) ChangePassword(id uint, req *request.ChangePasswordRequest
 
 	user.Password = string(hashedPassword)
 	return s.userRepo.Update(user)
+}
+
+// DeleteAccount 注销用户（硬删除）
+func (s *userService) DeleteAccount(id uint, req *request.DeleteAccountRequest) error {
+	user, err := s.GetUserByID(id)
+	if err != nil {
+		return err
+	}
+
+	// 验证密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		return bizerrors.ErrInvalidCredentials
+	}
+
+	// 验证邮箱验证码
+	ctx := context.Background()
+	if err := s.verifyCodeSvc.Verify(ctx, user.Email, "delete_account", req.Code); err != nil {
+		return err
+	}
+
+	// 删除头像文件
+	if user.Avatar != "" {
+		avatarPath := "." + user.Avatar
+		if err := os.Remove(avatarPath); err != nil && !os.IsNotExist(err) {
+			logger.Warn("删除头像文件失败", zap.String("path", avatarPath), zap.Error(err))
+		}
+	}
+
+	// 硬删除用户（级联删除所有关联数据）
+	return s.userRepo.HardDelete(id)
 }
 
 // GetUserResponse 获取用户响应

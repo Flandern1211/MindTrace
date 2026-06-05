@@ -107,6 +107,15 @@ func (a *App) initDatabase() error {
 	logger.Info("开始数据库迁移...")
 	if err := a.mysqlDB.AutoMigrate(
 		&entity.User{},
+		&entity.Notebook{},
+		&entity.Conversation{},
+		&entity.Message{},
+		&entity.Source{},
+		&entity.ParentBlock{},
+		&entity.UserConfig{},
+		&entity.UserLLMConfig{},
+		&entity.YoudaoBinding{},
+		&entity.SysConfig{},
 		&entity.Source{},
 	); err != nil {
 		logger.Warn("数据库迁移警告", zap.Error(err))
@@ -128,6 +137,7 @@ func (a *App) initDatabase() error {
 func (a *App) initDependencies() {
 	// 创建 Repository
 	userRepo := repository.NewUserRepository(a.mysqlDB)
+	notebookRepo := repository.NewNotebookRepository(a.mysqlDB)
 	sourceRepo := repository.NewSourceRepository(a.mysqlDB)
 
 	// 创建 Service
@@ -137,6 +147,7 @@ func (a *App) initDependencies() {
 	tokenBlacklistSvc := service.NewTokenBlacklistService(a.redis)
 	userSvc := service.NewUserService(userRepo, verifyCodeSvc)
 	authSvc := service.NewAuthService(userRepo, userSvc, verifyCodeSvc, captchaSvc, tokenBlacklistSvc)
+	notebookSvc := service.NewNotebookService(notebookRepo)
 	sourceSvc := service.NewSourceService(sourceRepo)
 
 	// 创建外部服务客户端
@@ -167,6 +178,7 @@ func (a *App) initDependencies() {
 	)
 
 	// 创建 Router
+	a.router = api.NewRouter(userSvc, authSvc, notebookSvc, sourceSvc, captchaSvc, tokenBlacklistSvc)
 	a.router = api.NewRouter(userSvc, authSvc, sourceSvc, importerSvc, captchaSvc, tokenBlacklistSvc)
 }
 

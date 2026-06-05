@@ -67,9 +67,16 @@ func (r *userRepository) Update(user *entity.User) error {
 	return r.db.Save(user).Error
 }
 
-// Delete 删除用户
+// Delete 删除用户（软删除）
 func (r *userRepository) Delete(id uint) error {
 	return r.db.Delete(&entity.User{}, id).Error
+}
+
+// HardDelete 硬删除用户（级联删除所有关联数据）
+func (r *userRepository) HardDelete(id uint) error {
+	// 使用 Unscoped() 绕过软删除，执行真正的删除
+	// 由于外键 CASCADE 级联删除，关联数据会自动删除
+	return r.db.Unscoped().Delete(&entity.User{}, id).Error
 }
 
 // List 分页获取用户列表

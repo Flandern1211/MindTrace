@@ -2,6 +2,7 @@ package api
 
 import (
 	"YoudaoNoteLm/internal/api/v1/auth"
+	"YoudaoNoteLm/internal/api/v1/notebook"
 	"YoudaoNoteLm/internal/api/v1/importn"
 	"YoudaoNoteLm/internal/api/v1/source"
 	"YoudaoNoteLm/internal/api/v1/user"
@@ -14,8 +15,9 @@ import (
 type Router struct {
 	userCtrl       *user.Controller
 	authCtrl       *auth.Controller
-	tokenBlacklist service.TokenBlacklistService
+	notebookCtrl   *notebook.Controller
 	sourceCtrl     *source.Controller
+	tokenBlacklist service.TokenBlacklistService
 	importCtrl     *importn.Controller
 }
 
@@ -23,6 +25,7 @@ type Router struct {
 func NewRouter(
 	userService service.UserService,
 	authService service.AuthService,
+	notebookService service.NotebookService,
 	sourceService service.SourceService,
 	importerService service.ImporterService,
 	captchaSvc service.CaptchaService,
@@ -31,8 +34,9 @@ func NewRouter(
 	return &Router{
 		userCtrl:       user.NewController(userService, tokenBlacklist),
 		authCtrl:       auth.NewController(authService, userService, captchaSvc),
-		tokenBlacklist: tokenBlacklist,
+		notebookCtrl:   notebook.NewController(notebookService),
 		sourceCtrl:     source.NewController(sourceService, tokenBlacklist),
+		tokenBlacklist: tokenBlacklist,
 		importCtrl:     importn.NewController(importerService),
 	}
 }
@@ -43,6 +47,9 @@ func (r *Router) Setup(engine *gin.Engine) {
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.Logger())
 	engine.Use(middleware.CORS())
+
+	// 静态文件服务（头像等）
+	engine.Static("/uploads", "./uploads")
 
 	// 健康检查
 	engine.GET("/api/v1/health", func(c *gin.Context) {
@@ -60,6 +67,9 @@ func (r *Router) Setup(engine *gin.Engine) {
 
 		// 用户路由
 		r.userCtrl.RegisterRoutes(v1)
+
+		// 笔记本路由
+		r.notebookCtrl.RegisterRoutes(v1, r.tokenBlacklist)
 
 		// 资料来源路由（需认证）
 		r.sourceCtrl.RegisterRoutes(v1)
