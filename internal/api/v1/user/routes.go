@@ -12,7 +12,10 @@ func (ctrl *Controller) RegisterRoutes(r *gin.RouterGroup) {
 	{
 		userGroup.GET("/profile", ctrl.GetProfile)
 		userGroup.PUT("/profile", ctrl.UpdateProfile)
+		userGroup.PUT("/username", ctrl.UpdateUsername)
+		userGroup.POST("/avatar", ctrl.UploadAvatar)
 		userGroup.POST("/password", ctrl.ChangePassword)
+		userGroup.DELETE("/account", ctrl.DeleteAccount)
 		userGroup.GET("/list", ctrl.ListUsers)
 	}
 }

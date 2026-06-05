@@ -17,8 +17,10 @@ type UserRepository interface {
 	Create(user *entity.User) error
 	// Update 更新用户
 	Update(user *entity.User) error
-	// Delete 删除用户
+	// Delete 删除用户（软删除）
 	Delete(id uint) error
+	// HardDelete 硬删除用户（级联删除所有关联数据）
+	HardDelete(id uint) error
 	// List 分页获取用户列表
 	List(offset, limit int) ([]*entity.User, int64, error)
 	// ExistsByUsername 检查用户名是否存在
