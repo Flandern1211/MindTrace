@@ -77,7 +77,7 @@ func (s *configService) GetSearchEngine(userID uint) (external.SearchEngine, err
 		for _, cfg := range builtins {
 			if cfg.Enabled && cfg.ConfigKey == "searxng" {
 				logger.Info("使用 SearXNG 搜索引擎（缓存）", zap.String("url", cfg.ConfigValue))
-				return external.NewSearXNGEngine(cfg.ConfigValue), nil
+				return external.NewSearXNGEngine(parseJSONString(cfg.ConfigValue)), nil
 			}
 		}
 	} else {
@@ -85,11 +85,13 @@ func (s *configService) GetSearchEngine(userID uint) (external.SearchEngine, err
 		var err error
 		builtins, err = s.sysConfigRepo.FindByGroup("search")
 		if err == nil {
-			_ = s.cache.Set(ctx, sysCacheKey, builtins, sysConfigTTL)
+			if cacheErr := s.cache.Set(ctx, sysCacheKey, builtins, sysConfigTTL); cacheErr != nil {
+				logger.Warn("缓存系统配置失败", zap.String("key", sysCacheKey), zap.Error(cacheErr))
+			}
 			for _, cfg := range builtins {
 				if cfg.Enabled && cfg.ConfigKey == "searxng" {
 					logger.Info("使用 SearXNG 搜索引擎", zap.String("url", cfg.ConfigValue))
-					return external.NewSearXNGEngine(cfg.ConfigValue), nil
+					return external.NewSearXNGEngine(parseJSONString(cfg.ConfigValue)), nil
 				}
 			}
 		}
@@ -117,7 +119,9 @@ func (s *configService) GetLLMClient(userID uint) (external.LLMClient, error) {
 	}
 
 	// 回填缓存
-	_ = s.cache.Set(ctx, cacheKey, userCfgPtr, userConfigTTL)
+	if cacheErr := s.cache.Set(ctx, cacheKey, userCfgPtr, userConfigTTL); cacheErr != nil {
+		logger.Warn("缓存用户LLM配置失败", zap.Uint("user_id", userID), zap.Error(cacheErr))
+	}
 
 	return s.buildLLMClient(userCfgPtr)
 }
@@ -186,4 +190,13 @@ func (s *configService) ClearUserConfigCache(userID uint, configType string) {
 			zap.Error(err),
 		)
 	}
+}
+
+// parseJSONString 解析 JSON 字符串值（去掉引号）
+func parseJSONString(jsonStr string) string {
+	var s string
+	if err := json.Unmarshal([]byte(jsonStr), &s); err == nil {
+		return s
+	}
+	return jsonStr
 }

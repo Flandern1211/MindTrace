@@ -1,8 +1,9 @@
 package app
 
 import (
-	"YoudaoNoteLm/internal/api"
 	searchAgent "YoudaoNoteLm/internal/agent/search"
+	"YoudaoNoteLm/internal/api"
+	"Youdao
 	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/repository"
 	"YoudaoNoteLm/internal/service"
@@ -151,16 +152,19 @@ func (a *App) initDependencies() {
 	userSvc := service.NewUserService(userRepo, verifyCodeSvc)
 	authSvc := service.NewAuthService(userRepo, userSvc, verifyCodeSvc, captchaSvc, tokenBlacklistSvc)
 	notebookSvc := service.NewNotebookService(notebookRepo)
-	sourceSvc := service.NewSourceService(sourceRepo)
 
 	// 创建外部服务客户端
 	markitdownClient := external.NewMarkitdownClient(a.cfg.External.MarkItDown.URL)
-	minioStorage := external.NewMinIOStorage(
+	minioStorage, err := external.NewMinIOStorage(
 		a.cfg.External.MinIO.Endpoint,
 		a.cfg.External.MinIO.AccessKey,
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
+	if err != nil {
+		logger.Error("MinIO 存储初始化失败", zap.Error(err))
+		// MinIO 失败不影响核心功能，继续启动
+	}
 
 	// ASR 服务（根据 provider 配置自动选择实现）
 	asrSvc := external.NewASRService(a.cfg.External.ASR)
@@ -168,6 +172,9 @@ func (a *App) initDependencies() {
 	if setter, ok := asrSvc.(interface{ SetStorage(external.FileStorage) }); ok {
 		setter.SetStorage(minioStorage)
 	}
+
+	// 创建 Service（依赖外部客户端）
+	sourceSvc := service.NewSourceService(sourceRepo, minioStorage)
 
 	// 创建缓存
 	redisCache := cache.New(a.redis)
@@ -248,11 +255,18 @@ func (a *App) gracefulShutdown() {
 	}
 
 	// 关闭数据库连接
-	_ = database.CloseMySQL()
-	_ = database.CloseRedis()
+	if err := database.CloseMySQL(); err != nil {
+		logger.Error("关闭 MySQL 连接失败", zap.Error(err))
+	}
+	if err := database.CloseRedis(); err != nil {
+		logger.Error("关闭 Redis 连接失败", zap.Error(err))
+	}
 
 	// 同步日志
-	_ = logger.Sync()
+	if err := logger.Sync(); err != nil {
+		// 日志同步失败无法记录，只能忽略
+		_ = err
+	}
 
 	logger.Info("服务器已关闭")
 	logger.Info("=========================================")
