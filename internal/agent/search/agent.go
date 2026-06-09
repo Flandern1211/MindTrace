@@ -3,22 +3,22 @@ package search
 
 import (
 	"context"
-	"encoding/json"
+	"net/http"
+	"time"
 
 	"YoudaoNoteLm/internal/service"
-	"YoudaoNoteLm/internal/service/external"
 	bizerrors "YoudaoNoteLm/pkg/errors"
 	"YoudaoNoteLm/pkg/logger"
 
+	einoOpenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
 
-const maxAgentRounds = 5
+const maxAgentRounds = 2
 
 // SearchAgent 搜索 Agent（基于 Eino 框架）
 type SearchAgent struct {
@@ -37,141 +37,25 @@ func NewSearchAgent(
 	}
 }
 
-// einoChatModelAdapter 将 external.LLMClient 适配为 Eino 的 model.ToolCallingChatModel
-type einoChatModelAdapter struct {
-	llmClient external.LLMClient
-	tools     []*schema.ToolInfo
-}
-
-// Generate 实现 Eino model.BaseModel 接口
-func (a *einoChatModelAdapter) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	// 将 Eino Message 转换为 external.Message
-	messages := make([]external.Message, len(input))
-	for i, msg := range input {
-		messages[i] = external.Message{
-			Role:    string(msg.Role),
-			Content: msg.Content,
-		}
-		// 处理 ToolCalls
-		if len(msg.ToolCalls) > 0 {
-			messages[i].ToolCalls = make([]external.ToolCall, len(msg.ToolCalls))
-			for j, tc := range msg.ToolCalls {
-				// 将 Arguments 从 string 转换为 map[string]any
-				var argsMap map[string]any
-				if tc.Function.Arguments != "" {
-					if err := json.Unmarshal([]byte(tc.Function.Arguments), &argsMap); err != nil {
-						argsMap = make(map[string]any)
-					}
-				}
-				messages[i].ToolCalls[j] = external.ToolCall{
-					ID:        tc.ID,
-					Name:      tc.Function.Name,
-					Arguments: argsMap,
-				}
-			}
-		}
-		// 处理 ToolCallID
-		if msg.ToolCallID != "" {
-			messages[i].ToolCallID = msg.ToolCallID
-		}
-	}
-
-	// 转换工具定义
-	var toolDefs []external.ToolDef
-	if len(a.tools) > 0 {
-		toolDefs = make([]external.ToolDef, len(a.tools))
-		for i, t := range a.tools {
-			toolDefs[i] = external.ToolDef{
-				Name:        t.Name,
-				Description: t.Desc,
-			}
-			// 转换参数
-			if t.ParamsOneOf != nil {
-				jsonSchema, err := t.ParamsOneOf.ToJSONSchema()
-				if err == nil && jsonSchema != nil {
-					// 将 jsonschema 转换为 map[string]any
-					schemaJSON, err := json.Marshal(jsonSchema)
-					if err == nil {
-						var paramsMap map[string]any
-						json.Unmarshal(schemaJSON, &paramsMap)
-						toolDefs[i].Parameters = paramsMap
-					}
-				}
-			}
-		}
-	}
-
-	// 调用 LLM
-	resp, err := a.llmClient.ChatWithTools(messages, toolDefs)
+// createEinoChatModel 根据用户配置创建 Eino OpenAI ChatModel
+func (a *SearchAgent) createEinoChatModel(userID uint) (*einoOpenai.ChatModel, error) {
+	cfg, err := a.configService.GetChatModelConfig(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 转换响应为 Eino Message
-	result := &schema.Message{
-		Role:    schema.Assistant,
-		Content: resp.Content,
-	}
-
-	// 处理 ToolCalls
-	if len(resp.ToolCalls) > 0 {
-		result.ToolCalls = make([]schema.ToolCall, len(resp.ToolCalls))
-		for i, tc := range resp.ToolCalls {
-			// 将 Arguments 从 map[string]any 转换为 string
-			argsJSON := ""
-			if tc.Arguments != nil {
-				if b, err := json.Marshal(tc.Arguments); err == nil {
-					argsJSON = string(b)
-				}
-			}
-			result.ToolCalls[i] = schema.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: schema.FunctionCall{
-					Name:      tc.Name,
-					Arguments: argsJSON,
-				},
-			}
-		}
-	}
-
-	return result, nil
+	return einoOpenai.NewChatModel(context.Background(), &einoOpenai.ChatModelConfig{
+		Model:    cfg.Model,
+		BaseURL:  cfg.BaseURL,
+		APIKey:   cfg.APIKey,
+		Timeout:  60 * time.Second,
+		HTTPClient: &http.Client{Timeout: 90 * time.Second},
+	})
 }
 
-// Stream 实现 Eino model.BaseModel 接口（流式）
-func (a *einoChatModelAdapter) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	// 对于简单实现，先调用 Generate 然后包装为流
-	msg, err := a.Generate(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
-}
-
-// WithTools 实现 Eino model.ToolCallingChatModel 接口
-func (a *einoChatModelAdapter) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
-	// 创建新的适配器实例，避免并发问题
-	return &einoChatModelAdapter{
-		llmClient: a.llmClient,
-		tools:     tools,
-	}, nil
-}
-
-// Execute 执行搜索任务（协调者调用入口）
-// 返回 service.SearchAgentResult 以实现 service.SearchAgentInterface
-func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task string) (*service.SearchAgentResult, error) {
-	// 注入 userID 和 notebookID 到 context
-	ctx = WithUserID(ctx, userID)
-	ctx = WithNotebookID(ctx, notebookID)
-
-	// 通过 ConfigService 获取用户的 LLM 客户端
-	llmClient, err := a.configService.GetLLMClient(userID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 创建 Eino 工具
-	tools := make([]tool.BaseTool, 0, 4)
+// createTools 创建搜索 Agent 的工具列表（web_search + import_urls）
+func (a *SearchAgent) createTools() ([]tool.BaseTool, error) {
+	tools := make([]tool.BaseTool, 0, 2)
 
 	webSearchTool, err := NewWebSearchTool(a.configService)
 	if err != nil {
@@ -179,29 +63,28 @@ func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task
 	}
 	tools = append(tools, webSearchTool)
 
-	analyzeTool, err := NewAnalyzeResultsTool(llmClient)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 analyze_results 工具失败", err)
-	}
-	tools = append(tools, analyzeTool)
-
-	refineTool, err := NewRefineQueryTool(llmClient)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 refine_query 工具失败", err)
-	}
-	tools = append(tools, refineTool)
-
 	importTool, err := NewImportURLsTool(a.importer)
 	if err != nil {
 		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 import_urls 工具失败", err)
 	}
 	tools = append(tools, importTool)
 
-	// 创建 Eino ChatModel 适配器
-	chatModel := &einoChatModelAdapter{llmClient: llmClient}
+	return tools, nil
+}
 
-	// 创建 Eino Agent
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+// createAgent 创建 Eino Agent
+func (a *SearchAgent) createAgent(ctx context.Context, userID uint) (*adk.ChatModelAgent, error) {
+	chatModel, err := a.createEinoChatModel(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	tools, err := a.createTools()
+	if err != nil {
+		return nil, err
+	}
+
+	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "SearchAgent",
 		Description: "网络搜索助手，帮助用户搜索、分析和导入网络内容",
 		Instruction: SearchSystemPrompt,
@@ -211,19 +94,30 @@ func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task
 				Tools: tools,
 			},
 		},
+		MaxIterations: 4, // 2 轮搜索 + 最终回复 + 余量
 	})
+}
+
+// Execute 执行搜索任务（非流式）
+func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task string) (*service.SearchAgentResult, error) {
+	ctx = WithUserID(ctx, userID)
+	ctx = WithNotebookID(ctx, notebookID)
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	agent, err := a.createAgent(ctx, userID)
 	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 Eino Agent 失败", err)
+		return nil, err
 	}
 
-	// 创建 Runner
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
 		EnableStreaming: false,
 	})
 
-	// 执行查询
 	searchRounds := 0
+	totalToolCalls := 0
 	var finalContent string
 
 	iter := runner.Query(ctx, task)
@@ -234,26 +128,46 @@ func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task
 		}
 
 		if event.Err != nil {
+			if ctx.Err() != nil {
+				logger.Error("Agent 执行超时", zap.Error(ctx.Err()))
+				return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "搜索超时，请稍后重试", ctx.Err())
+			}
 			logger.Error("Agent 执行错误", zap.Error(event.Err))
 			return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "Agent 执行失败", event.Err)
 		}
 
-		// 处理事件
-		if event.Output != nil && event.Output.MessageOutput != nil {
-			msg, err := event.Output.MessageOutput.GetMessage()
-			if err != nil {
-				logger.Warn("获取消息失败", zap.Error(err))
-				continue
-			}
+		if event.Output == nil || event.Output.MessageOutput == nil {
+			continue
+		}
 
-			// 统计搜索轮数
-			if event.Output.MessageOutput.ToolName == "web_search" {
-				searchRounds++
-			}
+		msg, err := event.Output.MessageOutput.GetMessage()
+		if err != nil {
+			logger.Warn("获取消息失败", zap.Error(err))
+			continue
+		}
 
-			// 获取最终内容
-			if msg.Role == schema.Assistant && len(msg.ToolCalls) == 0 {
-				finalContent = msg.Content
+		// 统计搜索轮数
+		if event.Output.MessageOutput.ToolName == "web_search" {
+			searchRounds++
+		}
+
+		// 获取最终内容（assistant 消息且无工具调用）
+		if msg.Role == schema.Assistant && len(msg.ToolCalls) == 0 {
+			finalContent = msg.Content
+		}
+
+		// 工具调用计数
+		if len(msg.ToolCalls) > 0 {
+			totalToolCalls++
+			if totalToolCalls > maxAgentRounds {
+				logger.Warn("达到最大工具调用轮数，强制结束",
+					zap.Int("maxRounds", maxAgentRounds),
+					zap.Int("searchRounds", searchRounds),
+				)
+				if finalContent == "" {
+					finalContent = "搜索已完成，但达到轮数限制。以下是已搜索到的结果。"
+				}
+				break
 			}
 		}
 	}
@@ -270,92 +184,52 @@ func (a *SearchAgent) Execute(ctx context.Context, userID, notebookID uint, task
 }
 
 // ExecuteStream 执行搜索任务（流式返回）
-func (a *SearchAgent) ExecuteStream(ctx context.Context, userID, notebookID uint, task string) ([]*service.SearchAgentEvent, error) {
-	// 注入 userID 和 notebookID 到 context
-	ctx = WithUserID(ctx, userID)
-	ctx = WithNotebookID(ctx, notebookID)
+func (a *SearchAgent) ExecuteStream(ctx context.Context, userID, notebookID uint, task string) <-chan *service.SearchAgentEvent {
+	eventCh := make(chan *service.SearchAgentEvent, 16)
 
-	// 通过 ConfigService 获取用户的 LLM 客户端
-	llmClient, err := a.configService.GetLLMClient(userID)
-	if err != nil {
-		return nil, err
-	}
+	go func() {
+		defer close(eventCh)
 
-	// 创建 Eino 工具
-	tools := make([]tool.BaseTool, 0, 4)
+		ctx = WithUserID(ctx, userID)
+		ctx = WithNotebookID(ctx, notebookID)
 
-	webSearchTool, err := NewWebSearchTool(a.configService)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 web_search 工具失败", err)
-	}
-	tools = append(tools, webSearchTool)
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
 
-	analyzeTool, err := NewAnalyzeResultsTool(llmClient)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 analyze_results 工具失败", err)
-	}
-	tools = append(tools, analyzeTool)
-
-	refineTool, err := NewRefineQueryTool(llmClient)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 refine_query 工具失败", err)
-	}
-	tools = append(tools, refineTool)
-
-	importTool, err := NewImportURLsTool(a.importer)
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 import_urls 工具失败", err)
-	}
-	tools = append(tools, importTool)
-
-	// 创建 Eino ChatModel 适配器
-	chatModel := &einoChatModelAdapter{llmClient: llmClient}
-
-	// 创建 Eino Agent
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        "SearchAgent",
-		Description: "网络搜索助手，帮助用户搜索、分析和导入网络内容",
-		Instruction: SearchSystemPrompt,
-		Model:       chatModel,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools,
-			},
-		},
-	})
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeLLMCallFailed, "创建 Eino Agent 失败", err)
-	}
-
-	// 创建 Runner
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent:           agent,
-		EnableStreaming: true,
-	})
-
-	// 执行查询并收集事件
-	iter := runner.Query(ctx, task)
-
-	var events []*service.SearchAgentEvent
-	searchRounds := 0
-
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
+		agent, err := a.createAgent(ctx, userID)
+		if err != nil {
+			eventCh <- &service.SearchAgentEvent{Type: "error", Error: err.Error()}
+			return
 		}
 
-		if event.Err != nil {
-			logger.Error("Agent 流式执行错误", zap.Error(event.Err))
-			events = append(events, &service.SearchAgentEvent{
-				Type:  "error",
-				Error: event.Err.Error(),
-			})
-			return events, nil
-		}
+		runner := adk.NewRunner(ctx, adk.RunnerConfig{
+			Agent:           agent,
+			EnableStreaming: true,
+		})
 
-		// 处理事件
-		if event.Output != nil && event.Output.MessageOutput != nil {
+		iter := runner.Query(ctx, task)
+		searchRounds := 0
+		totalToolCalls := 0
+
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+
+			if event.Err != nil {
+				if ctx.Err() != nil {
+					eventCh <- &service.SearchAgentEvent{Type: "error", Error: "搜索超时，请稍后重试"}
+				} else {
+					eventCh <- &service.SearchAgentEvent{Type: "error", Error: event.Err.Error()}
+				}
+				return
+			}
+
+			if event.Output == nil || event.Output.MessageOutput == nil {
+				continue
+			}
+
 			msg, err := event.Output.MessageOutput.GetMessage()
 			if err != nil {
 				logger.Warn("获取消息失败", zap.Error(err))
@@ -365,44 +239,48 @@ func (a *SearchAgent) ExecuteStream(ctx context.Context, userID, notebookID uint
 			// 统计搜索轮数
 			if event.Output.MessageOutput.ToolName == "web_search" {
 				searchRounds++
-				events = append(events, &service.SearchAgentEvent{
+				eventCh <- &service.SearchAgentEvent{
 					Type:         "search_round",
 					SearchRounds: searchRounds,
-				})
+				}
 			}
 
 			// 发送内容事件
 			if msg.Content != "" {
-				events = append(events, &service.SearchAgentEvent{
+				eventCh <- &service.SearchAgentEvent{
 					Type:    "content",
 					Content: msg.Content,
 					Role:    string(msg.Role),
-				})
+				}
 			}
 
-			// 工具调用事件
+			// 工具调用事件 + 轮数截断
 			if len(msg.ToolCalls) > 0 {
+				totalToolCalls++
 				for _, tc := range msg.ToolCalls {
-					events = append(events, &service.SearchAgentEvent{
+					eventCh <- &service.SearchAgentEvent{
 						Type:     "tool_call",
 						ToolName: tc.Function.Name,
 						ToolArgs: tc.Function.Arguments,
-					})
+					}
+				}
+				if totalToolCalls > maxAgentRounds {
+					logger.Warn("达到最大工具调用轮数，强制结束",
+						zap.Int("maxRounds", maxAgentRounds),
+						zap.Int("searchRounds", searchRounds),
+					)
+					break
 				}
 			}
 		}
-	}
 
-	// 发送完成事件
-	events = append(events, &service.SearchAgentEvent{
-		Type:         "done",
-		SearchRounds: searchRounds,
-	})
+		eventCh <- &service.SearchAgentEvent{
+			Type:         "done",
+			SearchRounds: searchRounds,
+		}
 
-	logger.Info("Agent 流式执行完成",
-		zap.Int("searchRounds", searchRounds),
-		zap.Int("events", len(events)),
-	)
+		logger.Info("Agent 流式执行完成", zap.Int("searchRounds", searchRounds))
+	}()
 
-	return events, nil
+	return eventCh
 }
