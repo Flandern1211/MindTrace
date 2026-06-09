@@ -74,3 +74,10 @@ markitdown_service
 cmd/test_*/
 cmd/seed_*/
 tests/integration/
+
+# Debug and temporary test files
+response*.json
+test_output.txt
+test_result.txt
+test_*.ps1
+tasks.md

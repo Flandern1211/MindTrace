@@ -1,0 +1,294 @@
+# CD（持续部署）工作流配置
+# 作用：自动化部署应用到 CentOS 7 服务器
+# 触发条件：仅当 CI 测试通过且合并到 develop 分支时触发
+# 服务器环境：CentOS 7 + Supervisor 进程管理
+
+name: CD
+
+on:
+  # 当 develop 分支收到 push 时触发
+  # 注意：这会在 CI 完成后自动触发部署
+  push:
+    branches: [ develop ]
+
+  # 允许手动触发部署（用于紧急修复或回滚）
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署环境'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  # 部署到 staging 环境
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    # 仅在以下情况执行：
+    # 1. 自动触发（push 到 develop）
+    # 2. 手动触发且选择 staging 环境
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+
+    # 环境配置（需要在 GitHub 仓库设置中配置）
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+
+    steps:
+      # 步骤1：检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤2：设置 Go 环境
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      # 步骤3：构建 Linux 版本的二进制文件
+      # 作用：交叉编译生成 Linux 可执行文件（服务器是 CentOS 7）
+      # GOOS=linux: 目标操作系统为 Linux
+      # GOARCH=amd64: 目标架构为 64 位 x86
+      # CGO_ENABLED=0: 禁用 CGO，生成静态链接的二进制文件，兼容 CentOS 7
+      - name: Build for CentOS 7
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o youdaonotelm-server ./cmd/server
+          chmod +x youdaonotelm-server  # 添加执行权限
+
+      # 步骤4：上传构建产物
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youdaonotelm-server-staging
+          path: youdaonotelm-server
+          retention-days: 3
+
+      # 步骤5：部署到服务器（使用 SSH 密钥认证）
+      # 作用：通过 SSH 连接到 CentOS 7 服务器并部署应用
+      # 需要配置以下 Secrets：
+      # - SSH_PRIVATE_KEY: SSH 私钥（推荐使用密钥认证，更安全）
+      # - SSH_HOST: 服务器地址（60.205.184.232）
+      # - SSH_USERNAME: SSH 用户名（root）
+      - name: Deploy to CentOS 7 server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}  # 服务器 IP：60.205.184.232
+          username: ${{ secrets.SSH_USERNAME }}  # 用户名：root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH 私钥
+          port: 22
+          script: |
+            # 进入应用目录
+            cd /home/flandern/youdaonotelm/server
+
+            # 备份当前版本
+            if [ -f youdaonotelm-server ]; then
+              cp youdaonotelm-server youdaonotelm-server.backup.$(date +%Y%m%d_%H%M%S)
+              echo "✅ Backup created"
+            fi
+
+            # 停止 Supervisor 管理的进程
+            # 作用：停止当前运行的服务，准备替换新版本
+            sudo supervisorctl stop youdaonotelm-server
+            echo "✅ Service stopped"
+
+            # 备份配置文件
+            # 作用：保留现有配置，避免部署时覆盖
+            if [ -f configs/config.yaml ]; then
+              cp configs/config.yaml configs/config.yaml.backup
+              echo "✅ Config backed up"
+            fi
+
+      # 步骤6：传输新版本到服务器
+      # 作用：使用 SCP 将构建好的二进制文件传输到服务器
+      - name: Transfer binary to server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "youdaonotelm-server"
+          target: "/home/flandern/youdaonotelm/server/"
+          overwrite: true
+
+      # 步骤7：启动服务
+      # 作用：在服务器上通过 Supervisor 启动应用并验证服务状态
+      - name: Start service via Supervisor
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /home/flandern/youdaonotelm/server
+
+            # 恢复配置文件
+            if [ -f configs/config.yaml.backup ]; then
+              mv configs/config.yaml.backup configs/config.yaml
+              echo "✅ Config restored"
+            fi
+
+            # 通过 Supervisor 启动服务
+            # 作用：使用 Supervisor 管理进程，确保服务稳定运行
+            sudo supervisorctl start youdaonotelm-server
+            echo "✅ Service started via Supervisor"
+
+            # 等待服务启动
+            sleep 5
+
+            # 检查 Supervisor 进程状态
+            # 作用：验证服务是否成功启动
+            status=$(sudo supervisorctl status youdaonotelm-server)
+            if echo "$status" | grep -q "RUNNING"; then
+              echo "✅ Service is running: $status"
+            else
+              echo "❌ Service failed to start: $status"
+              # 查看 Supervisor 日志
+              sudo supervisorctl tail youdaonotelm-server stderr
+              exit 1
+            fi
+
+            # 检查端口是否监听
+            # 作用：验证应用是否正常监听端口
+            # 从 config.yaml 动态读取端口号（适配端口变更）
+            port=$(grep -A1 "^app:" configs/config.yaml | grep "port:" | awk '{print $2}')
+            if netstat -tuln | grep ":${port}" > /dev/null; then
+              echo "✅ Port ${port} is listening"
+            else
+              echo "⚠️ Port ${port} not detected, checking logs..."
+              sudo supervisorctl tail youdaonotelm-server stderr
+            fi
+
+      # 步骤8：健康检查
+      # 作用：验证部署的应用是否正常运行
+      - name: Health check
+        run: |
+          # 等待服务完全启动
+          sleep 10
+
+          # 发送健康检查请求
+          # 注意：需要将 STAGING_URL 替换为实际的 staging 环境地址
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.STAGING_URL }}/health" || echo "000")
+
+          if [ "$response" = "200" ]; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed with status: $response"
+            exit 1
+          fi
+
+      # 步骤9：通知部署结果（可选）
+      # 作用：发送部署成功或失败的通知
+      - name: Notify deployment result
+        if: always()  # 无论成功失败都执行
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "🎉 Deployment to staging succeeded!"
+            # 这里可以添加钉钉、企业微信或 Slack 通知
+          else
+            echo "💥 Deployment to staging failed!"
+            # 发送失败通知
+          fi
+
+  # 部署到 production 环境（需要手动触发）
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # 仅在手动触发且选择 production 环境时执行
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+
+    # 生产环境配置
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+
+    # 需要额外审批（在 GitHub 环境设置中配置）
+    # 可以设置 required_reviewers 来要求审批
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build for CentOS 7
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o youdaonotelm-server ./cmd/server
+          chmod +x youdaonotelm-server
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /home/flandern/youdaonotelm/server
+
+            # 备份当前版本
+            cp youdaonotelm-server youdaonotelm-server.production.backup.$(date +%Y%m%d_%H%M%S)
+
+            # 停止 Supervisor 服务
+            sudo supervisorctl stop youdaonotelm-server
+
+            # 备份配置
+            cp configs/config.yaml configs/config.yaml.production.backup
+
+      - name: Transfer binary to production
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: 22
+          source: "youdaonotelm-server"
+          target: "/home/flandern/youdaonotelm/server/"
+          overwrite: true
+
+      - name: Start production service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /home/flandern/youdaonotelm/server
+
+            # 恢复配置
+            mv configs/config.yaml.production.backup configs/config.yaml
+
+            # 通过 Supervisor 启动服务
+            sudo supervisorctl start youdaonotelm-server
+
+            # 验证服务
+            sleep 5
+            status=$(sudo supervisorctl status youdaonotelm-server)
+            if echo "$status" | grep -q "RUNNING"; then
+              echo "✅ Production service is running"
+            else
+              echo "❌ Production service failed to start"
+              sudo supervisorctl tail youdaonotelm-server stderr
+              exit 1
+            fi
+
+      - name: Production health check
+        run: |
+          sleep 10
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.PRODUCTION_URL }}/health" || echo "000")
+
+          if [ "$response" = "200" ]; then
+            echo "✅ Production health check passed"
+          else
+            echo "❌ Production health check failed"
+            exit 1
+          fi
