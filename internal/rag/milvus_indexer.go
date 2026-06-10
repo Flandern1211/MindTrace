@@ -98,6 +98,10 @@ func (w *MilvusWriter) EnsureCollection(ctx context.Context, userID uint) error 
 					"max_length": "2048",
 				},
 			},
+			{
+				Name:     "sparse_vector",
+				DataType: entity.FieldTypeSparseVector,
+			},
 		},
 	}
 
@@ -112,6 +116,16 @@ func (w *MilvusWriter) EnsureCollection(ctx context.Context, userID uint) error 
 	}
 	if err := w.client.CreateIndex(ctx, collName, "vector", idxParam, false); err != nil {
 		return fmt.Errorf("创建索引失败: %w", err)
+	}
+
+	// 创建 BM25 索引（全文检索）
+	// 注意: SDK v2.4.2 没有 NewIndexBM25Sparse，使用 NewIndexSparseInverted + IP 代替
+	bm25IdxParam, err := entity.NewIndexSparseInverted(entity.IP, 0.0)
+	if err != nil {
+		return fmt.Errorf("创建 BM25 索引参数失败: %w", err)
+	}
+	if err := w.client.CreateIndex(ctx, collName, "sparse_vector", bm25IdxParam, false); err != nil {
+		return fmt.Errorf("创建 BM25 索引失败: %w", err)
 	}
 
 	// 加载 Collection
