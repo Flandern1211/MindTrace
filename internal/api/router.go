@@ -3,6 +3,9 @@ package api
 import (
 	"YoudaoNoteLm/internal/api/v1/admin"
 	"YoudaoNoteLm/internal/api/v1/auth"
+	"YoudaoNoteLm/internal/api/v1/notebook"
+	"YoudaoNoteLm/internal/api/v1/importn"
+	"YoudaoNoteLm/internal/api/v1/source"
 	"YoudaoNoteLm/internal/api/v1/importn"
 	"YoudaoNoteLm/internal/api/v1/notebook"
 	"YoudaoNoteLm/internal/api/v1/providers"

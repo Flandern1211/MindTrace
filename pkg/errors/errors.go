@@ -65,6 +65,7 @@ var (
 	ErrVerifyCodeLocked      = NewDefault(CodeVerifyCodeLocked)
 	ErrVerifyCodeTooFrequent = NewDefault(CodeVerifyCodeTooFrequent)
 
+
 	ErrUnsupportedFormat      = NewDefault(CodeUnsupportedFormat)
 	ErrFileTooLarge           = NewDefault(CodeFileTooLarge)
 	ErrFileParseFailed        = NewDefault(CodeFileParseFailed)

@@ -1,9 +1,6 @@
 package service
 
 import (
-	"YoudaoNoteLm/internal/service/external/asr"
-	"YoudaoNoteLm/internal/service/external/document"
-	"YoudaoNoteLm/internal/service/external/storage"
 	"bytes"
 	"context"
 	"fmt"
@@ -15,6 +12,7 @@ import (
 
 	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/repository"
+	"YoudaoNoteLm/internal/service/external"
 	"YoudaoNoteLm/pkg/cache"
 	bizerrors "YoudaoNoteLm/pkg/errors"
 	"YoudaoNoteLm/pkg/logger"
@@ -37,8 +35,8 @@ const maxAudioSize int64 = 300 << 20 // 300MB
 
 type importerService struct {
 	configSvc    ConfigService
-	converter    document.DocumentConverter // 兜底默认
-	storage      storage.FileStorage
+	markitdown   external.MarkitdownClient
+	storage      external.FileStorage
 	sourceRepo   repository.SourceRepository
 	importCache  *cache.ImportTaskCache
 	previewCache *cache.AudioPreviewCache
@@ -48,35 +46,22 @@ type importerService struct {
 // NewImporterService 创建导入服务
 func NewImporterService(
 	configSvc ConfigService,
-	converter document.DocumentConverter,
-	storage storage.FileStorage,
+	markitdown external.MarkitdownClient,
+	storage external.FileStorage,
 	sourceRepo repository.SourceRepository,
 	importCache *cache.ImportTaskCache,
 	previewCache *cache.AudioPreviewCache,
 	embedding EmbeddingService,
 ) ImporterService {
 	return &importerService{
+		markitdown:   markitdown,
 		configSvc:    configSvc,
-		converter:    converter,
 		storage:      storage,
 		sourceRepo:   sourceRepo,
 		importCache:  importCache,
 		previewCache: previewCache,
 		embedding:    embedding,
 	}
-}
-
-// getConverter 获取文档转换器（直接使用配置文件中的 markitdown 客户端）
-func (s *importerService) getConverter() document.DocumentConverter {
-	return s.converter
-}
-
-// getASR 获取 ASR 服务（从 ConfigService 动态获取）
-func (s *importerService) getASR() (asr.ASRService, error) {
-	if s.configSvc != nil {
-		return s.configSvc.GetASRService(0) // userID=0 表示系统级
-	}
-	return nil, fmt.Errorf("未配置 ConfigService")
 }
 
 // ImportFile 文件上传导入
@@ -101,25 +86,13 @@ func (s *importerService) ImportFile(userID, notebookID uint, file *multipart.Fi
 	}
 
 	// 上传到 MinIO 存储
-	if s.storage == nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "文件存储服务未配置", nil)
-	}
-	// 重新打开文件用于上传
-	src2, err := file.Open()
-	if err != nil {
-		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "重新打开文件失败", err)
-	}
-	defer src2.Close()
 	filePath, err := s.storage.Upload(file)
 	if err != nil {
 		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "文件上传失败", err)
 	}
 
-	// 获取文档转换器（优先从 ConfigService 读取数据库配置）
-	converter := s.getConverter()
-
-	// 通过 io.Reader 传给文档转换服务
-	markdown, err := converter.ConvertReader(file.Filename, bytes.NewReader(fileBytes))
+	// 通过 io.Reader 传给 MarkItDown 转换
+	markdown, err := s.markitdown.ConvertReader(file.Filename, bytes.NewReader(fileBytes))
 	if err != nil {
 		return nil, bizerrors.NewWithErr(bizerrors.CodeFileParseFailed, "文件解析失败", err)
 	}
@@ -146,6 +119,7 @@ func (s *importerService) ImportFile(userID, notebookID uint, file *multipart.Fi
 			if err := s.embedding.Vectorize(source.ID, markdown); err != nil {
 				logger.Warn("向量化失败", zap.Uint("source_id", source.ID), zap.Error(err))
 			} else {
+				_ = s.sourceRepo.SetVectorized(source.ID)
 				if err := s.sourceRepo.SetVectorized(source.ID); err != nil {
 					logger.Warn("标记向量化状态失败", zap.Uint("source_id", source.ID), zap.Error(err))
 				}
@@ -167,9 +141,6 @@ func (s *importerService) PreviewAudio(userID, notebookID uint, file *multipart.
 	}
 
 	// 上传原始文件到 MinIO
-	if s.storage == nil {
-		return "", "", "", bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "文件存储服务未配置", nil)
-	}
 	filePath, err := s.storage.Upload(file)
 	if err != nil {
 		return "", "", "", bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "音频上传失败", err)
@@ -333,54 +304,18 @@ func (s *importerService) ImportSearchResults(userID, notebookID uint, urls []st
 // processURLs 异步处理 URL 列表
 func (s *importerService) processURLs(taskID string, userID, notebookID uint, urls []string) {
 	ctx := context.Background()
-	for i, url := range urls {
-		// 检查任务是否已被取消或删除
-		task, err := s.importCache.Get(ctx, taskID)
-		if err != nil || task == nil {
-			logger.Info("导入任务已被取消或删除，停止处理", zap.String("task_id", taskID))
-			return
-		}
-		if task.Status == "cancelled" {
-			logger.Info("导入任务已取消，停止处理", zap.String("task_id", taskID))
-			return
-		}
-
-		// 更新进度
-		task.Status = "running"
-		task.ProcessedCount = i
-		if err := s.importCache.Save(ctx, task); err != nil {
-			logger.Warn("更新任务进度失败", zap.String("task_id", taskID), zap.Error(err))
-		}
-
-		// 获取文档转换器
-		converter := s.getConverter()
-
-		// 预检：判断 URL 是否可抓取
-		ok, ct, checkErr := converter.CheckURL(url)
-		if !ok {
-			logger.Warn("URL预检不通过，跳过", zap.String("url", url), zap.String("content_type", ct), zap.Error(checkErr))
-			s.incrementTaskFail(ctx, taskID, fmt.Sprintf("%s: 不可抓取 (Content-Type: %s)", url, ct))
-			continue
-		}
-		logger.Info("URL预检通过，开始转换", zap.String("url", url), zap.String("content_type", ct))
-
-		markdown, err := converter.ConvertFromURL(url)
+	for _, url := range urls {
+		markdown, err := s.markitdown.ConvertFromURL(url)
 		if err != nil {
 			logger.Warn("URL转换失败", zap.String("url", url), zap.Error(err))
 			s.incrementTaskFail(ctx, taskID, fmt.Sprintf("%s: %v", url, err))
 			continue
 		}
 
-		// 从 URL 提取名称，截断到 255 字符以内
-		name := url
-		if len(name) > 200 {
-			name = name[:200] + "..."
-		}
-
 		source := &entity.Source{
 			UserID:          userID,
 			NotebookID:      notebookID,
-			Name:            name,
+			Name:            url,
 			Type:            "url",
 			OriginalURL:     url,
 			MarkdownContent: markdown,

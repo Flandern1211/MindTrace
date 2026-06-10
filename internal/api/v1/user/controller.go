@@ -180,9 +180,7 @@ func (ctrl *Controller) DeleteAccount(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
 		token := authHeader[7:]
-		if err := ctrl.tokenBlacklist.RevokeToken(c.Request.Context(), token); err != nil {
-			logger.Warn("注销账号时吊销token失败", zap.Error(err))
-		}
+		_ = ctrl.tokenBlacklist.RevokeToken(c.Request.Context(), token)
 	}
 
 	response.Success(c, gin.H{"message": "账号已注销"})
