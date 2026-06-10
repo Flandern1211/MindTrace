@@ -192,6 +192,148 @@ func (w *MilvusWriter) Store(ctx context.Context, userID uint, docs []*schema.Do
 	return nil
 }
 
+// mapToSparseEmbedding 将 map[int32]float32 转换为 Milvus SDK 的 SparseEmbedding
+func mapToSparseEmbedding(m map[int32]float32) (entity.SparseEmbedding, error) {
+	positions := make([]uint32, 0, len(m))
+	values := make([]float32, 0, len(m))
+	for k, v := range m {
+		positions = append(positions, uint32(k))
+		values = append(values, v)
+	}
+	return entity.NewSliceSparseEmbedding(positions, values)
+}
+
+// mapsToSparseEmbeddings 批量转换
+func mapsToSparseEmbeddings(maps []map[int32]float32) ([]entity.SparseEmbedding, error) {
+	result := make([]entity.SparseEmbedding, len(maps))
+	for i, m := range maps {
+		se, err := mapToSparseEmbedding(m)
+		if err != nil {
+			return nil, fmt.Errorf("转换 sparse embedding #%d 失败: %w", i, err)
+		}
+		result[i] = se
+	}
+	return result, nil
+}
+
+// StoreWithSparse 将文档、dense vector 和 sparse vector 写入用户专属 Collection
+func (w *MilvusWriter) StoreWithSparse(ctx context.Context, userID uint, docs []*schema.Document, denseVectors [][]float32, sparseVectors []map[int32]float32) error {
+	if len(docs) == 0 || len(docs) != len(denseVectors) || len(docs) != len(sparseVectors) {
+		return fmt.Errorf("文档、dense向量和sparse向量数量不匹配: docs=%d, dense=%d, sparse=%d", len(docs), len(denseVectors), len(sparseVectors))
+	}
+
+	n := len(docs)
+	contents := make([]string, n)
+	denseData := make([][]float32, n)
+	parentBlockIDs := make([]int64, n)
+	sourceIDs := make([]int64, n)
+	chunkTypes := make([]string, n)
+	metadatas := make([]string, n)
+
+	for i, doc := range docs {
+		contents[i] = doc.Content
+		denseData[i] = denseVectors[i]
+
+		if pid, ok := doc.MetaData["parent_index"].(int); ok {
+			parentBlockIDs[i] = int64(pid)
+		}
+		if sid, ok := doc.MetaData["source_id"].(uint); ok {
+			sourceIDs[i] = int64(sid)
+		}
+		if ct, ok := doc.MetaData["chunk_type"].(string); ok {
+			chunkTypes[i] = ct
+		}
+		metaJSON, _ := json.Marshal(doc.MetaData)
+		metadatas[i] = string(metaJSON)
+	}
+
+	// 转换 sparse vectors 为 Milvus SDK 格式
+	allSparseEmbeddings, err := mapsToSparseEmbeddings(sparseVectors)
+	if err != nil {
+		return fmt.Errorf("转换 sparse vectors 失败: %w", err)
+	}
+
+	// 按 batch 写入
+	batchSize := 100
+	for start := 0; start < n; start += batchSize {
+		end := start + batchSize
+		if end > n {
+			end = n
+		}
+
+		sparseColumn := entity.NewColumnSparseVectors("sparse_vector", allSparseEmbeddings[start:end])
+
+		columns := []entity.Column{
+			entity.NewColumnVarChar("content", contents[start:end]),
+			entity.NewColumnFloatVector("vector", VectorDim, denseData[start:end]),
+			entity.NewColumnInt64("parent_block_id", parentBlockIDs[start:end]),
+			entity.NewColumnInt64("source_id", sourceIDs[start:end]),
+			entity.NewColumnVarChar("chunk_type", chunkTypes[start:end]),
+			entity.NewColumnVarChar("metadata", metadatas[start:end]),
+			sparseColumn,
+		}
+
+		if _, err := w.client.Insert(ctx, UserCollectionName(userID), "", columns...); err != nil {
+			return fmt.Errorf("写入 Milvus 失败 (batch %d-%d): %w", start, end, err)
+		}
+	}
+
+	return nil
+}
+
+// GenerateSparseVector 将文本转换为 BM25 sparse vector
+func GenerateSparseVector(text string) map[int32]float32 {
+	words := segmentText(text)
+	freq := make(map[string]int)
+	for _, w := range words {
+		freq[w]++
+	}
+
+	sv := make(map[int32]float32)
+	for word, count := range freq {
+		idx := hashToIndex(word)
+		sv[idx] = float32(count) / float32(count+1)
+	}
+	return sv
+}
+
+// segmentText 简单分词：中文按单字+bigram，英文按空格分词
+func segmentText(text string) []string {
+	var words []string
+	runes := []rune(text)
+	i := 0
+	for i < len(runes) {
+		r := runes[i]
+		if r >= 0x4e00 && r <= 0x9fff {
+			words = append(words, string(r))
+			if i+1 < len(runes) && runes[i+1] >= 0x4e00 && runes[i+1] <= 0x9fff {
+				words = append(words, string(runes[i:i+2]))
+			}
+			i++
+		} else if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			j := i
+			for j < len(runes) && ((runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z') || (runes[j] >= '0' && runes[j] <= '9')) {
+				j++
+			}
+			words = append(words, string(runes[i:j]))
+			i = j
+		} else {
+			i++
+		}
+	}
+	return words
+}
+
+// hashToIndex 将词 hash 为 int32 索引 (FNV-1a 变体)
+func hashToIndex(word string) int32 {
+	var h uint32 = 2166136261
+	for _, b := range []byte(word) {
+		h ^= uint32(b)
+		h *= 16777619
+	}
+	return int32(h % 100000)
+}
+
 // DeleteBySourceID 删除指定 source 在用户专属 Collection 中的所有 ChildChunk
 func (w *MilvusWriter) DeleteBySourceID(ctx context.Context, userID uint, sourceID uint) error {
 	expr := fmt.Sprintf(`source_id == %d`, sourceID)
