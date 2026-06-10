@@ -4,10 +4,12 @@ import (
 	"YoudaoNoteLm/internal/service"
 	bizerrors "YoudaoNoteLm/pkg/errors"
 	"YoudaoNoteLm/pkg/jwt"
+	"YoudaoNoteLm/pkg/logger"
 	"YoudaoNoteLm/pkg/response"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 const (
@@ -111,7 +113,12 @@ func OptionalAuth(blacklist service.TokenBlacklistService) gin.HandlerFunc {
 		claims, err := jwt.ParseToken(parts[1])
 		if err == nil && claims.TokenType == jwt.AccessToken {
 			// 检查黑名单
-			revoked, _ := blacklist.IsRevoked(c.Request.Context(), claims.ID)
+			revoked, err := blacklist.IsRevoked(c.Request.Context(), claims.ID)
+			if err != nil {
+				logger.Error("检查 token 黑名单失败", zap.Error(err))
+				// 查询失败时默认视为已吊销（安全优先）
+				revoked = true
+			}
 			if !revoked {
 				c.Set(ContextUserID, claims.GetUserID())
 				c.Set(ContextUsername, claims.GetUsername())

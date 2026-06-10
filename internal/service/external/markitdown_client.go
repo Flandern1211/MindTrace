@@ -62,7 +62,10 @@ func (c *markitdownClient) ConvertReader(filename string, reader io.Reader) (str
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", fmt.Errorf("MarkItDown返回错误 %d，且读取响应体失败: %w", resp.StatusCode, readErr)
+		}
 		return "", fmt.Errorf("MarkItDown返回错误 %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -89,7 +92,9 @@ func (c *markitdownClient) ConvertFromURL(url string) (string, error) {
 	// MarkItDown 服务的 /convert_url 使用 Form 表单
 	formBody := &bytes.Buffer{}
 	writer := multipart.NewWriter(formBody)
-	_ = writer.WriteField("url", url)
+	if err := writer.WriteField("url", url); err != nil {
+		return "", fmt.Errorf("写入 URL 字段失败: %w", err)
+	}
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("关闭writer失败: %w", err)
 	}
@@ -101,7 +106,10 @@ func (c *markitdownClient) ConvertFromURL(url string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", fmt.Errorf("MarkItDown URL转换返回错误 %d，且读取响应体失败: %w", resp.StatusCode, readErr)
+		}
 		return "", fmt.Errorf("MarkItDown URL转换返回错误 %d: %s", resp.StatusCode, string(respBody))
 	}
 

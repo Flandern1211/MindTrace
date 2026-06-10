@@ -2,8 +2,10 @@ package app
 
 import (
 	"YoudaoNoteLm/internal/api"
+	"YoudaoNoteLm/internal/ingestion"
 	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/repository"
+
 	"YoudaoNoteLm/internal/service"
 	"YoudaoNoteLm/internal/service/external"
 	"YoudaoNoteLm/pkg/cache"
@@ -12,6 +14,7 @@ import (
 	"YoudaoNoteLm/pkg/logger"
 	"context"
 	"fmt"
+	"github.com/cloudwego/eino/components/embedding"
 	"net/http"
 	"os"
 	"os/signal"
@@ -145,10 +148,6 @@ func (a *App) initDependencies() {
 	verifyCodeSvc := service.NewVerifyCodeService(a.redis, emailSvc)
 	captchaSvc := service.NewCaptchaService(a.redis)
 	tokenBlacklistSvc := service.NewTokenBlacklistService(a.redis)
-	userSvc := service.NewUserService(userRepo, verifyCodeSvc)
-	authSvc := service.NewAuthService(userRepo, userSvc, verifyCodeSvc, captchaSvc, tokenBlacklistSvc)
-	notebookSvc := service.NewNotebookService(notebookRepo)
-	sourceSvc := service.NewSourceService(sourceRepo)
 
 	// 创建外部服务客户端
 	markitdownClient := external.NewMarkitdownClient(a.cfg.External.MarkItDown.URL)
@@ -158,6 +157,10 @@ func (a *App) initDependencies() {
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
+
+	userSvc := service.NewUserService(userRepo, verifyCodeSvc, minioStorage)
+	authSvc := service.NewAuthService(userRepo, userSvc, verifyCodeSvc, captchaSvc, tokenBlacklistSvc)
+	notebookSvc := service.NewNotebookService(notebookRepo)
 
 	// ASR 服务（根据 provider 配置自动选择实现）
 	asrSvc := external.NewASRService(a.cfg.External.ASR)
@@ -171,14 +174,56 @@ func (a *App) initDependencies() {
 	importTaskCache := cache.NewImportTaskCache(redisCache)
 	audioPreviewCache := cache.NewAudioPreviewCache(redisCache)
 
-	// 创建导入服务（EmbeddingService 暂时为 nil，后续模块接入）
+	// 创建 IngestionService
+	ingestionSvc := a.initIngestionService(sourceRepo)
+	if ingestionSvc == nil {
+		logger.Warn("IngestionService 为 nil，文档导入后不会自动向量化")
+	}
+
+	// 创建 SourceService（需要 IngestionService 来删除向量数据）
+	sourceSvc := service.NewSourceService(sourceRepo, ingestionSvc)
+
+	// 创建导入服务
 	importerSvc := service.NewImporterService(
 		markitdownClient, asrSvc, minioStorage,
-		sourceRepo, importTaskCache, audioPreviewCache, nil,
+		sourceRepo, importTaskCache, audioPreviewCache, ingestionSvc,
 	)
 
 	// 创建 Router
 	a.router = api.NewRouter(userSvc, authSvc, notebookSvc, sourceSvc, importerSvc, captchaSvc, tokenBlacklistSvc)
+}
+
+// initIngestionService 初始化入库服务
+// 从数据库读取用户的 Embedding 配置，创建 EmbedderProvider 和 MilvusWriter
+func (a *App) initIngestionService(sourceRepo repository.SourceRepository) ingestion.IngestionService {
+	ctx := context.Background()
+
+	// 创建 Milvus Writer
+	milvusWriter, err := ingestion.NewMilvusWriter(ctx, ingestion.MilvusIndexerConfig{
+		Address: a.cfg.External.Milvus.Address,
+	})
+	if err != nil {
+		logger.Warn("Milvus Writer 初始化失败，入库功能不可用", zap.Error(err))
+		return nil
+	}
+
+	// 创建 EmbedderProvider：根据 userID 从数据库读取配置
+	userConfigRepo := repository.NewUserConfigRepository(a.mysqlDB)
+	embedderProvider := func(ctx context.Context, userID uint) (embedding.Embedder, error) {
+		cfg, err := userConfigRepo.FindByUserAndType(userID, "embedding")
+		if err != nil {
+			return nil, err
+		}
+		if cfg == nil {
+			return nil, fmt.Errorf("用户 %d 未配置 Embedding", userID)
+		}
+		return ingestion.NewEmbedder(ctx, cfg)
+	}
+
+	parentRepo := repository.NewParentBlockRepository(a.mysqlDB)
+	ingestionSvc := ingestion.NewIngestionService(sourceRepo, parentRepo, embedderProvider, milvusWriter)
+	logger.Info("IngestionService 初始化成功")
+	return ingestionSvc
 }
 
 // initRouter 初始化路由
@@ -238,11 +283,15 @@ func (a *App) gracefulShutdown() {
 	}
 
 	// 关闭数据库连接
-	_ = database.CloseMySQL()
-	_ = database.CloseRedis()
+	if err := database.CloseMySQL(); err != nil {
+		logger.Error("关闭 MySQL 连接失败", zap.Error(err))
+	}
+	if err := database.CloseRedis(); err != nil {
+		logger.Error("关闭 Redis 连接失败", zap.Error(err))
+	}
 
 	// 同步日志
-	_ = logger.Sync()
+	_ = logger.Sync() // 日志同步失败无需处理，即将退出
 
 	logger.Info("服务器已关闭")
 	logger.Info("=========================================")

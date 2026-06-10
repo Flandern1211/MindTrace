@@ -1,18 +1,28 @@
 package service
 
 import (
+	"context"
+
+	"YoudaoNoteLm/internal/ingestion"
 	"YoudaoNoteLm/internal/model/dto/response"
 	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/repository"
 	bizerrors "YoudaoNoteLm/pkg/errors"
+	"YoudaoNoteLm/pkg/logger"
+
+	"go.uber.org/zap"
 )
 
 type sourceService struct {
-	sourceRepo repository.SourceRepository
+	sourceRepo   repository.SourceRepository
+	ingestionSvc ingestion.IngestionService
 }
 
-func NewSourceService(sourceRepo repository.SourceRepository) SourceService {
-	return &sourceService{sourceRepo: sourceRepo}
+func NewSourceService(sourceRepo repository.SourceRepository, ingestionSvc ingestion.IngestionService) SourceService {
+	return &sourceService{
+		sourceRepo:   sourceRepo,
+		ingestionSvc: ingestionSvc,
+	}
 }
 
 func (s *sourceService) List(userID, notebookID uint, keyword string, page, size int) ([]*response.SourceResponse, int64, error) {
@@ -61,14 +71,45 @@ func (s *sourceService) Rename(id uint, name string) error {
 }
 
 func (s *sourceService) Delete(id uint) error {
-	_, err := s.GetByID(id)
+	source, err := s.GetByID(id)
 	if err != nil {
 		return err
 	}
+
+	// 删除 Milvus 向量数据
+	if s.ingestionSvc != nil && source.Vectorized {
+		ctx := context.Background()
+		if err := s.ingestionSvc.DeleteSource(ctx, source.UserID, source.ID); err != nil {
+			logger.Warn("删除向量数据失败，继续删除数据库记录",
+				zap.Uint("source_id", source.ID),
+				zap.Error(err),
+			)
+		}
+	}
+
 	return s.sourceRepo.Delete(id)
 }
 
 func (s *sourceService) BatchDelete(ids []uint) error {
+	// 先获取所有 source 信息，删除 Milvus 数据
+	if s.ingestionSvc != nil {
+		ctx := context.Background()
+		for _, id := range ids {
+			source, err := s.sourceRepo.FindByID(id)
+			if err != nil || source == nil {
+				continue
+			}
+			if source.Vectorized {
+				if err := s.ingestionSvc.DeleteSource(ctx, source.UserID, source.ID); err != nil {
+					logger.Warn("批量删除：删除向量数据失败",
+						zap.Uint("source_id", source.ID),
+						zap.Error(err),
+					)
+				}
+			}
+		}
+	}
+
 	return s.sourceRepo.BatchDelete(ids)
 }
 
