@@ -2,7 +2,6 @@ package external
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -311,6 +310,3 @@ func (c *youdaoCLI) DeleteNote(apiKey string, fileID string) error {
 	_, err := c.runWithKey(apiKey, []string{"delete", fileID})
 	return err
 }
-
-// 确保 bytes 包被使用
-var _ = bytes.NewBuffer
