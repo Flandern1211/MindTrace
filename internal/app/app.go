@@ -29,11 +29,12 @@ import (
 
 // App 应用结构体
 type App struct {
-	cfg     *config.Config
-	mysqlDB *gorm.DB
-	redis   *redis.Client
-	router  *api.Router
-	server  *http.Server
+	cfg          *config.Config
+	mysqlDB      *gorm.DB
+	redis        *redis.Client
+	router       *api.Router
+	server       *http.Server
+	ragRetriever rag.RAGRetriever
 }
 
 // NewApp 创建应用实例
@@ -178,6 +179,41 @@ func (a *App) initDependencies() {
 	ingestionSvc := a.initIngestionService(sourceRepo)
 	if ingestionSvc == nil {
 		logger.Warn("IngestionService 为 nil，文档导入后不会自动向量化")
+	}
+
+	// 创建 RAGRetriever
+	if ingestionSvc != nil {
+		userConfigRepo := repository.NewUserConfigRepository(a.mysqlDB)
+		parentBlockRepo := repository.NewParentBlockRepository(a.mysqlDB)
+		embedderProvider := func(ctx context.Context, userID uint) (embedding.Embedder, error) {
+			cfg, err := userConfigRepo.FindByUserAndType(userID, "embedding")
+			if err != nil {
+				return nil, err
+			}
+			if cfg == nil {
+				return nil, fmt.Errorf("用户 %d 未配置 Embedding", userID)
+			}
+			return rag.NewEmbedder(ctx, cfg)
+		}
+		rerankProvider := rag.NewRerankProvider(userConfigRepo)
+
+		// 创建独立的 MilvusWriter 用于检索（Milvus 客户端轻量）
+		milvusWriter, err := rag.NewMilvusWriter(context.Background(), rag.MilvusIndexerConfig{
+			Address: a.cfg.External.Milvus.Address,
+		})
+		if err != nil {
+			logger.Warn("Milvus Writer 初始化失败，RAGRetriever 不可用", zap.Error(err))
+		} else {
+			a.ragRetriever = rag.NewRAGRetriever(
+				milvusWriter,
+				parentBlockRepo,
+				sourceRepo,
+				embedderProvider,
+				rerankProvider,
+				5, // defaultTopK
+			)
+			logger.Info("RAGRetriever 初始化成功")
+		}
 	}
 
 	// 创建 SourceService（需要 IngestionService 来删除向量数据）
