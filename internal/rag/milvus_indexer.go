@@ -342,6 +342,160 @@ func (w *MilvusWriter) DeleteBySourceID(ctx context.Context, userID uint, source
 	return w.client.Delete(ctx, UserCollectionName(userID), "", expr)
 }
 
+// MilvusSearchResult Milvus 检索结果
+type MilvusSearchResult struct {
+	ID            int64
+	Content       string
+	ParentBlockID int64
+	SourceID      int64
+	ChunkType     string
+	Metadata      string
+	Score         float32
+}
+
+// MilvusSearcher Milvus 检索接口
+type MilvusSearcher interface {
+	SemanticSearch(ctx context.Context, userID uint, queryVector []float32, sourceIDs []uint, topK int) ([]MilvusSearchResult, error)
+	KeywordSearch(ctx context.Context, userID uint, queryText string, sourceIDs []uint, topK int) ([]MilvusSearchResult, error)
+}
+
+// SemanticSearch 基于 dense vector 的语义检索
+func (w *MilvusWriter) SemanticSearch(ctx context.Context, userID uint, queryVector []float32, sourceIDs []uint, topK int) ([]MilvusSearchResult, error) {
+	collName := UserCollectionName(userID)
+
+	filter := ""
+	if len(sourceIDs) > 0 {
+		ids := make([]string, len(sourceIDs))
+		for i, id := range sourceIDs {
+			ids[i] = fmt.Sprintf("%d", id)
+		}
+		filter = fmt.Sprintf("source_id in [%s]", strings.Join(ids, ","))
+	}
+
+	searchParams, err := entity.NewIndexHNSWSearchParam(200)
+	if err != nil {
+		return nil, fmt.Errorf("创建 HNSW 搜索参数失败: %w", err)
+	}
+
+	outputFields := []string{"content", "parent_block_id", "source_id", "chunk_type", "metadata"}
+
+	results, err := w.client.Search(ctx, collName, []string{}, filter, outputFields,
+		[]entity.Vector{entity.FloatVector(queryVector)},
+		"vector", entity.COSINE, topK, searchParams,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("语义检索失败: %w", err)
+	}
+
+	return parseSearchResults(results), nil
+}
+
+// KeywordSearch 基于 sparse vector 的关键词检索
+func (w *MilvusWriter) KeywordSearch(ctx context.Context, userID uint, queryText string, sourceIDs []uint, topK int) ([]MilvusSearchResult, error) {
+	collName := UserCollectionName(userID)
+
+	filter := ""
+	if len(sourceIDs) > 0 {
+		ids := make([]string, len(sourceIDs))
+		for i, id := range sourceIDs {
+			ids[i] = fmt.Sprintf("%d", id)
+		}
+		filter = fmt.Sprintf("source_id in [%s]", strings.Join(ids, ","))
+	}
+
+	searchParams, err := entity.NewIndexSparseInvertedSearchParam(0.0)
+	if err != nil {
+		return nil, fmt.Errorf("创建 sparse 搜索参数失败: %w", err)
+	}
+
+	outputFields := []string{"content", "parent_block_id", "source_id", "chunk_type", "metadata"}
+
+	// 将 queryText 转换为 sparse vector
+	querySparseMap := GenerateSparseVector(queryText)
+	querySparseVec, err := mapToSparseEmbedding(querySparseMap)
+	if err != nil {
+		return nil, fmt.Errorf("转换查询 sparse vector 失败: %w", err)
+	}
+
+	results, err := w.client.Search(ctx, collName, []string{}, filter, outputFields,
+		[]entity.Vector{querySparseVec},
+		"sparse_vector", entity.IP, topK, searchParams,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("关键词检索失败: %w", err)
+	}
+
+	return parseSearchResults(results), nil
+}
+
+// parseSearchResults 将 Milvus SearchResult 转换为 MilvusSearchResult 切片
+func parseSearchResults(results []milvusclient.SearchResult) []MilvusSearchResult {
+	if len(results) == 0 {
+		return nil
+	}
+
+	var parsed []MilvusSearchResult
+	for _, result := range results {
+		if result.Err != nil {
+			continue
+		}
+		for i := 0; i < result.ResultCount; i++ {
+			item := MilvusSearchResult{
+				Score: result.Scores[i],
+			}
+
+			// 从 ID 列获取主键
+			if result.IDs != nil {
+				if val, err := result.IDs.Get(i); err == nil {
+					if id, ok := val.(int64); ok {
+						item.ID = id
+					}
+				}
+			}
+
+			// 从 Fields 获取各字段
+			if col := result.Fields.GetColumn("content"); col != nil {
+				if val, err := col.Get(i); err == nil {
+					if s, ok := val.(string); ok {
+						item.Content = s
+					}
+				}
+			}
+			if col := result.Fields.GetColumn("parent_block_id"); col != nil {
+				if val, err := col.Get(i); err == nil {
+					if id, ok := val.(int64); ok {
+						item.ParentBlockID = id
+					}
+				}
+			}
+			if col := result.Fields.GetColumn("source_id"); col != nil {
+				if val, err := col.Get(i); err == nil {
+					if id, ok := val.(int64); ok {
+						item.SourceID = id
+					}
+				}
+			}
+			if col := result.Fields.GetColumn("chunk_type"); col != nil {
+				if val, err := col.Get(i); err == nil {
+					if s, ok := val.(string); ok {
+						item.ChunkType = s
+					}
+				}
+			}
+			if col := result.Fields.GetColumn("metadata"); col != nil {
+				if val, err := col.Get(i); err == nil {
+					if s, ok := val.(string); ok {
+						item.Metadata = s
+					}
+				}
+			}
+
+			parsed = append(parsed, item)
+		}
+	}
+	return parsed
+}
+
 // Close 关闭 Milvus 客户端
 func (w *MilvusWriter) Close() {
 	w.client.Close()
