@@ -10,6 +10,7 @@ import (
 	"YoudaoNoteLm/internal/api/v1/source"
 	"YoudaoNoteLm/internal/api/v1/user"
 	"YoudaoNoteLm/internal/api/v1/user_config"
+	youdao "YoudaoNoteLm/internal/api/v1/youdao"
 	"YoudaoNoteLm/internal/middleware"
 	"YoudaoNoteLm/internal/service"
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,7 @@ type Router struct {
 	userCfgCtrl    *user_config.Controller
 	searchCtrl     *search.Controller
 	providerCtrl   *providers.Controller
+	youdaoCtrl     *youdao.Controller
 }
 
 // NewRouter 创建路由
@@ -42,6 +44,7 @@ func NewRouter(
 	captchaSvc service.CaptchaService,
 	tokenBlacklist service.TokenBlacklistService,
 	configService service.ConfigService,
+	youdaoService service.YoudaoService,
 ) *Router {
 	return &Router{
 		userCtrl:       user.NewController(userService, tokenBlacklist),
@@ -54,6 +57,7 @@ func NewRouter(
 		adminCtrl:      admin.NewController(adminService),
 		userCfgCtrl:    user_config.NewController(userConfigService, tokenBlacklist),
 		providerCtrl:   providers.NewController(configService),
+		youdaoCtrl:     youdao.NewController(youdaoService),
 	}
 }
 
@@ -101,6 +105,9 @@ func (r *Router) Setup(engine *gin.Engine) {
 
 		// 搜索路由（需认证）
 		r.searchCtrl.RegisterRoutes(v1)
+
+		// 有道云笔记路由（需认证）
+		r.youdaoCtrl.RegisterRoutes(v1, r.tokenBlacklist)
 
 		// Provider 发现路由（/active 支持可选认证）
 		r.providerCtrl.RegisterRoutes(v1, middleware.OptionalAuth(r.tokenBlacklist))
