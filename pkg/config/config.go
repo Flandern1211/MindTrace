@@ -4,13 +4,13 @@ import "time"
 
 // Config 应用配置结构体
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	Log       LogConfig       `mapstructure:"log"`
-	CORS      CORSConfig      `mapstructure:"cors"`
-	Email     EmailConfig     `mapstructure:"email"`
-	External  ExternalConfig  `mapstructure:"external"`
+	App      AppConfig      `mapstructure:"app"`
+	Database DatabaseConfig `mapstructure:"database"`
+	JWT      JWTConfig      `mapstructure:"jwt"`
+	Log      LogConfig      `mapstructure:"log"`
+	CORS     CORSConfig     `mapstructure:"cors"`
+	Email    EmailConfig    `mapstructure:"email"`
+	External ExternalConfig `mapstructure:"external"`
 }
 
 // ExternalConfig 外部服务配置
@@ -18,6 +18,28 @@ type ExternalConfig struct {
 	MarkItDown MarkItDownConfig `mapstructure:"markitdown"`
 	ASR        ASRConfig        `mapstructure:"asr"`
 	MinIO      MinIOConfig      `mapstructure:"minio"`
+	Milvus     MilvusConfig     `mapstructure:"milvus"`
+	Bocha      BochaConfig      `mapstructure:"bocha"`
+}
+
+// BochaConfig 博查联网搜索配置
+type BochaConfig struct {
+	BaseURL         string `mapstructure:"base_url"`
+	Endpoint        string `mapstructure:"endpoint"`
+	APIKey          string `mapstructure:"api_key"`
+	TimeoutSeconds  int    `mapstructure:"timeout_seconds"`
+	DefaultCount    int    `mapstructure:"default_count"`
+	Summary         bool   `mapstructure:"summary"`
+	CacheTTLSeconds int    `mapstructure:"cache_ttl_seconds"`
+	MaxCount        int    `mapstructure:"max_count"`
+}
+
+// MilvusConfig Milvus 向量数据库配
+// MilvusConfig Milvus 向量数据库配置
+type MilvusConfig struct {
+	Address  string `mapstructure:"address"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 // MarkItDownConfig 文档转换服务配置

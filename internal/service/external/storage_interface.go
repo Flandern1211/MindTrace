@@ -1,6 +1,9 @@
 package external
 
-import "mime/multipart"
+import (
+	"mime/multipart"
+	"time"
+)
 
 // FileStorage 文件存储接口
 type FileStorage interface {
@@ -8,4 +11,5 @@ type FileStorage interface {
 	UploadBytes(objectName string, data []byte, contentType string) error
 	Download(filePath string) ([]byte, error)
 	Delete(filePath string) error
+	GetPresignedURL(filePath string, expiry time.Duration) (string, error)
 }
