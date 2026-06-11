@@ -1,6 +1,13 @@
 package app
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 	"YoudaoNoteLm/internal/api"
 	"YoudaoNoteLm/internal/rag"
 	"YoudaoNoteLm/internal/model/entity"
@@ -12,22 +19,15 @@ import (
 	"YoudaoNoteLm/pkg/config"
 	"YoudaoNoteLm/pkg/database"
 	"YoudaoNoteLm/pkg/logger"
-	"context"
-	"fmt"
-	"github.com/cloudwego/eino/components/embedding"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
+	"github.com/cloudwego/eino/components/embedding"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
-// App 应用结构体
+// App 应用入口。
 type App struct {
 	cfg          *config.Config
 	mysqlDB      *gorm.DB
@@ -37,37 +37,26 @@ type App struct {
 	ragRetriever rag.RAGRetriever
 }
 
-// NewApp 创建应用实例
+// NewApp 创建应用。
 func NewApp() *App {
 	return &App{}
 }
 
-// Initialize 初始化应用
+// Initialize 初始化应用依赖。
 func (a *App) Initialize() error {
-	// 1. 加载配置
 	if err := a.initConfig(); err != nil {
 		return err
 	}
-
-	// 2. 初始化日志
 	if err := a.initLogger(); err != nil {
 		return err
 	}
-
-	// 3. 初始化数据库
 	if err := a.initDatabase(); err != nil {
 		return err
 	}
 
-	// 4. 初始化依赖
 	a.initDependencies()
-
-	// 5. 初始化路由
 	a.initRouter()
-
-	// 6. 初始化服务器
 	a.initServer()
-
 	return nil
 }
 
@@ -75,7 +64,7 @@ func (a *App) Initialize() error {
 func (a *App) initConfig() error {
 	cfg, err := config.Load("")
 	if err != nil {
-		return fmt.Errorf("加载配置失败: %w", err)
+		return fmt.Errorf("load config failed: %w", err)
 	}
 	a.cfg = cfg
 	return nil
@@ -84,15 +73,15 @@ func (a *App) initConfig() error {
 // initLogger 初始化日志
 func (a *App) initLogger() error {
 	if err := logger.Init(&a.cfg.Log); err != nil {
-		return fmt.Errorf("日志初始化失败: %w", err)
+		return fmt.Errorf("init logger failed: %w", err)
 	}
 
 	// 打印启动横幅
 	logger.Info("=========================================")
-	logger.Info(fmt.Sprintf("欢迎使用 %s", a.cfg.App.Name))
-	logger.Info(fmt.Sprintf("版本: %s", a.cfg.App.Version))
-	logger.Info(fmt.Sprintf("模式: %s", a.cfg.App.Mode))
-	logger.Info("配置加载成功")
+	logger.Info(fmt.Sprintf("starting %s", a.cfg.App.Name))
+	logger.Info(fmt.Sprintf("version: %s", a.cfg.App.Version))
+	logger.Info(fmt.Sprintf("mode: %s", a.cfg.App.Mode))
+	logger.Info("config loaded")
 	logger.Info("=========================================")
 
 	return nil
@@ -103,7 +92,7 @@ func (a *App) initDatabase() error {
 	// 初始化 MySQL
 	mysqlDB, err := database.InitMySQL(&a.cfg.Database.MySQL)
 	if err != nil {
-		return fmt.Errorf("MySQL 初始化失败: %w", err)
+		return fmt.Errorf("init mysql failed: %w", err)
 	}
 	a.mysqlDB = mysqlDB
 
@@ -122,15 +111,13 @@ func (a *App) initDatabase() error {
 		&entity.SysConfig{},
 		&entity.Source{},
 	); err != nil {
-		logger.Warn("数据库迁移警告", zap.Error(err))
-	} else {
-		logger.Info("数据库迁移完成")
+		logger.Warn("database migration failed", zap.Error(err))
 	}
 
 	// 初始化 Redis（可选）
 	rs, err := database.InitRedis(&a.cfg.Database.Redis)
 	if err != nil {
-		logger.Warn("Redis 初始化失败，将不影响核心功能", zap.Error(err))
+		logger.Warn("init redis failed, continue without redis", zap.Error(err))
 	}
 	a.redis = rs
 
@@ -143,6 +130,7 @@ func (a *App) initDependencies() {
 	userRepo := repository.NewUserRepository(a.mysqlDB)
 	notebookRepo := repository.NewNotebookRepository(a.mysqlDB)
 	sourceRepo := repository.NewSourceRepository(a.mysqlDB)
+	userConfigRepo := repository.NewUserConfigRepository(a.mysqlDB)
 
 	// 创建 Service
 	emailSvc := service.NewEmailService()
@@ -158,6 +146,7 @@ func (a *App) initDependencies() {
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
+	bochaClient := external.NewBochaSearchClient(&http.Client{}, a.cfg.External.Bocha.Endpoint)
 
 	userSvc := service.NewUserService(userRepo, verifyCodeSvc, minioStorage)
 	authSvc := service.NewAuthService(userRepo, userSvc, verifyCodeSvc, captchaSvc, tokenBlacklistSvc)
@@ -170,15 +159,18 @@ func (a *App) initDependencies() {
 		setter.SetStorage(minioStorage)
 	}
 
-	// 创建缓存
-	redisCache := cache.New(a.redis)
+	var redisCache *cache.Cache
+	if a.redis != nil {
+		redisCache = cache.New(a.redis)
+	}
 	importTaskCache := cache.NewImportTaskCache(redisCache)
 	audioPreviewCache := cache.NewAudioPreviewCache(redisCache)
+	searchSvc := service.NewSearchService(bochaClient, userConfigRepo, redisCache, a.cfg.External.Bocha)
 
 	// 创建 IngestionService
 	ingestionSvc := a.initIngestionService(sourceRepo)
 	if ingestionSvc == nil {
-		logger.Warn("IngestionService 为 nil，文档导入后不会自动向量化")
+		logger.Warn("ingestion service unavailable, vector ingestion disabled")
 	}
 
 	// 创建 RAGRetriever
@@ -235,12 +227,25 @@ func (a *App) initDependencies() {
 
 	// 创建导入服务
 	importerSvc := service.NewImporterService(
-		markitdownClient, asrSvc, minioStorage,
-		sourceRepo, importTaskCache, audioPreviewCache, ingestionSvc,
+		markitdownClient,
+		asrSvc,
+		minioStorage,
+		sourceRepo,
+		importTaskCache,
+		audioPreviewCache,
+		ingestionSvc,
 	)
 
-	// 创建 Router
-	a.router = api.NewRouter(userSvc, authSvc, notebookSvc, sourceSvc, importerSvc, captchaSvc, tokenBlacklistSvc)
+	a.router = api.NewRouter(
+		userSvc,
+		authSvc,
+		notebookSvc,
+		sourceSvc,
+		searchSvc,
+		importerSvc,
+		captchaSvc,
+		tokenBlacklistSvc,
+	)
 }
 
 // initIngestionService 初始化入库服务
@@ -253,7 +258,7 @@ func (a *App) initIngestionService(sourceRepo repository.SourceRepository) rag.I
 		Address: a.cfg.External.Milvus.Address,
 	})
 	if err != nil {
-		logger.Warn("Milvus Writer 初始化失败，入库功能不可用", zap.Error(err))
+		logger.Warn("init milvus writer failed", zap.Error(err))
 		return nil
 	}
 
@@ -265,7 +270,7 @@ func (a *App) initIngestionService(sourceRepo repository.SourceRepository) rag.I
 			return nil, err
 		}
 		if cfg == nil {
-			return nil, fmt.Errorf("用户 %d 未配置 Embedding", userID)
+			return nil, fmt.Errorf("user %d missing embedding config", userID)
 		}
 		return rag.NewEmbedder(ctx, cfg)
 	}
@@ -295,20 +300,20 @@ func (a *App) initServer() {
 		Handler:        engine,
 		ReadTimeout:    60 * time.Second,
 		WriteTimeout:   60 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1 MB
+		MaxHeaderBytes: 1 << 20,
 	}
 }
 
-// Run 运行应用
+// Run 启动应用。
 func (a *App) Run() {
 	// 启动 HTTP 服务器
 	go func() {
-		logger.Info("HTTP 服务器启动",
+		logger.Info("http server started",
 			zap.String("addr", a.server.Addr),
 			zap.String("mode", a.cfg.App.Mode),
 		)
 		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("HTTP 服务器启动失败", zap.Error(err))
+			logger.Fatal("http server failed", zap.Error(err))
 		}
 	}()
 
@@ -322,22 +327,22 @@ func (a *App) gracefulShutdown() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("正在关闭服务器...")
+	logger.Info("shutting down server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// 关闭 HTTP 服务器
 	if err := a.server.Shutdown(ctx); err != nil {
-		logger.Error("服务器关闭失败", zap.Error(err))
+		logger.Error("shutdown server failed", zap.Error(err))
 	}
 
 	// 关闭数据库连接
 	if err := database.CloseMySQL(); err != nil {
-		logger.Error("关闭 MySQL 连接失败", zap.Error(err))
+		logger.Error("close mysql failed", zap.Error(err))
 	}
 	if err := database.CloseRedis(); err != nil {
-		logger.Error("关闭 Redis 连接失败", zap.Error(err))
+		logger.Error("close redis failed", zap.Error(err))
 	}
 
 	// 同步日志
