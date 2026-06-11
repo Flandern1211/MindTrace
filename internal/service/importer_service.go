@@ -83,7 +83,12 @@ func (s *importerService) ImportFile(userID, notebookID uint, file *multipart.Fi
 	if err != nil {
 		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "打开上传文件失败", err)
 	}
-	defer src.Close()
+	defer func(src multipart.File) {
+		err := src.Close()
+		if err != nil {
+			logger.Errorf("关闭文件失败:%s", err)
+		}
+	}(src)
 	fileBytes, err := io.ReadAll(src)
 	if err != nil {
 		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "读取上传文件失败", err)
@@ -190,7 +195,7 @@ func (s *importerService) doAudioTranscribe(previewID string, userID uint, file 
 
 	// 转换音频为 ASR 兼容格式
 	asrFilePath := filePath
-	convertedData, convErr := s.convertAudioForASR(file, filePath, ext)
+	convertedData, convErr := s.convertAudioForASR(file, ext)
 	if convErr != nil {
 		logger.Warn("音频格式转换失败，将使用原始文件", zap.String("file", filePath), zap.Error(convErr))
 	} else if convertedData != nil {
@@ -332,13 +337,18 @@ func (s *importerService) ConfirmAudio(userID uint, previewID string, editedCont
 
 // convertAudioForASR 转换音频为 ASR 兼容格式
 // 如果已经是 16kHz 单声道则返回 nil（无需转换）
-func (s *importerService) convertAudioForASR(file *multipart.FileHeader, filePath, ext string) ([]byte, error) {
+func (s *importerService) convertAudioForASR(file *multipart.FileHeader, ext string) ([]byte, error) {
 	// 读取文件内容
 	src, err := file.Open()
 	if err != nil {
 		return nil, fmt.Errorf("打开音频文件失败: %w", err)
 	}
-	defer src.Close()
+	defer func(src multipart.File) {
+		err := src.Close()
+		if err != nil {
+			logger.Errorf("关闭文件失败:%s", err)
+		}
+	}(src)
 
 	audioData, err := io.ReadAll(src)
 	if err != nil {

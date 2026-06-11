@@ -81,7 +81,10 @@ func (ctrl *Controller) SearchStream(c *gin.Context) {
 				logger.Warn("SSE 序列化事件失败", zap.Error(err))
 				continue
 			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+			if err != nil {
+				return false
+			}
 			c.Writer.Flush()
 		}
 		return false

@@ -199,7 +199,10 @@ func (h *ConfigHealthChecker) testLLMAnthropic(config *entity.UserConfig) *Healt
 		"max_tokens": 1,
 	}
 
-	body, _ := json.Marshal(reqBody)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return &HealthCheckResult{Healthy: false, Message: "序列化请求体失败", Detail: err.Error()}
+	}
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
 	if err != nil {
 		return &HealthCheckResult{Healthy: false, Message: "创建请求失败"}

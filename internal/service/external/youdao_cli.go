@@ -70,8 +70,8 @@ func NewYoudaoCLI(cliPath string, converterScriptPath string) YoudaoCLI {
 
 // youdaonoteConfig CLI 配置文件结构
 type youdaonoteConfig struct {
-	Backend string            `json:"backend"`
-	MCP     youdaonoteMCP     `json:"mcp"`
+	Backend string        `json:"backend"`
+	MCP     youdaonoteMCP `json:"mcp"`
 }
 
 type youdaonoteMCP struct {
@@ -170,7 +170,7 @@ func (c *youdaoCLI) CheckAvailable() error {
 //
 //	📁 目录名 (id: xxx)
 //	📄 笔记名 (id: yyy)
-func parseListOutput(output string) []YoudaoNoteItem {
+func parseListOutput(output string) ([]YoudaoNoteItem, error) {
 	items := make([]YoudaoNoteItem, 0)
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
@@ -237,7 +237,10 @@ func parseListOutput(output string) []YoudaoNoteItem {
 			items = append(items, item)
 		}
 	}
-	return items
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("解析输出失败: %w", err)
+	}
+	return items, nil
 }
 
 // List 列出目录下笔记
@@ -252,7 +255,10 @@ func (c *youdaoCLI) List(apiKey string, folderID string) ([]YoudaoNoteItem, erro
 		return nil, err
 	}
 
-	items := parseListOutput(string(output))
+	items, err := parseListOutput(string(output))
+	if err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -306,7 +312,10 @@ func (c *youdaoCLI) Search(apiKey string, keyword string) ([]YoudaoNoteItem, err
 		return nil, err
 	}
 
-	items := parseListOutput(string(output))
+	items, err := parseListOutput(string(output))
+	if err != nil {
+		return nil, err
+	}
 	return items, nil
 }
 
@@ -338,7 +347,9 @@ func (c *youdaoCLI) CreateNote(apiKey string, title string, content string, pare
 		tmpFile.Close()
 		return "", fmt.Errorf("写入临时文件失败: %w", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("关闭临时文件失败: %w", err)
+	}
 
 	output, err := c.runWithKey(apiKey, []string{"save", "--json", "--file", tmpFile.Name()})
 	if err != nil {
@@ -370,7 +381,9 @@ func (c *youdaoCLI) UpdateNote(apiKey string, fileID string, content string) err
 		tmpFile.Close()
 		return fmt.Errorf("写入临时文件失败: %w", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("关闭临时文件失败: %w", err)
+	}
 
 	_, err = c.runWithKey(apiKey, []string{"update", fileID, "--file", tmpFile.Name()})
 	return err

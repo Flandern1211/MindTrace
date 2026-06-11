@@ -12,18 +12,20 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"YoudaoNoteLm/internal/service/external"
 	"YoudaoNoteLm/pkg/logger"
 
 	"go.uber.org/zap"
 )
 
-type minioStorage struct {
+// MinioStorage MinIO 存储实现（导出，供外部包类型断言使用）
+type MinioStorage struct {
 	client *minio.Client
 	bucket string
 }
 
 // NewMinIOStorage 创建 MinIO 存储
-func NewMinIOStorage(endpoint, accessKey, secretKey, bucket string) (FileStorage, error) {
+func NewMinIOStorage(endpoint, accessKey, secretKey, bucket string) (external.FileStorage, error) {
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: false,
@@ -32,11 +34,11 @@ func NewMinIOStorage(endpoint, accessKey, secretKey, bucket string) (FileStorage
 		return nil, fmt.Errorf("MinIO 初始化失败: %w", err)
 	}
 
-	return &minioStorage{client: client, bucket: bucket}, nil
+	return &MinioStorage{client: client, bucket: bucket}, nil
 }
 
 // Upload 上传文件到 MinIO
-func (s *minioStorage) Upload(file *multipart.FileHeader) (string, error) {
+func (s *MinioStorage) Upload(file *multipart.FileHeader) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", fmt.Errorf("打开上传文件失败: %w", err)
@@ -56,7 +58,7 @@ func (s *minioStorage) Upload(file *multipart.FileHeader) (string, error) {
 }
 
 // Download 从 MinIO 下载文件
-func (s *minioStorage) Download(filePath string) ([]byte, error) {
+func (s *MinioStorage) Download(filePath string) ([]byte, error) {
 	obj, err := s.client.GetObject(context.Background(), s.bucket, filePath, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("MinIO 获取文件失败: %w", err)
@@ -71,7 +73,7 @@ func (s *minioStorage) Download(filePath string) ([]byte, error) {
 }
 
 // Delete 从 MinIO 删除文件
-func (s *minioStorage) Delete(filePath string) error {
+func (s *MinioStorage) Delete(filePath string) error {
 	err := s.client.RemoveObject(context.Background(), s.bucket, filePath, minio.RemoveObjectOptions{})
 	if err != nil {
 		return fmt.Errorf("MinIO 删除文件失败: %w", err)
@@ -81,7 +83,7 @@ func (s *minioStorage) Delete(filePath string) error {
 }
 
 // GetPresignedURL 获取临时访问 URL
-func (s *minioStorage) GetPresignedURL(filePath string, expiry time.Duration) (string, error) {
+func (s *MinioStorage) GetPresignedURL(filePath string, expiry time.Duration) (string, error) {
 	url, err := s.client.PresignedGetObject(context.Background(), s.bucket, filePath, expiry, nil)
 	if err != nil {
 		return "", fmt.Errorf("生成预签名URL失败: %w", err)
@@ -90,7 +92,7 @@ func (s *minioStorage) GetPresignedURL(filePath string, expiry time.Duration) (s
 }
 
 // UploadBytes 上传字节数据（用于内部调用）
-func (s *minioStorage) UploadBytes(objectName string, data []byte, contentType string) error {
+func (s *MinioStorage) UploadBytes(objectName string, data []byte, contentType string) error {
 	_, err := s.client.PutObject(context.Background(), s.bucket, objectName,
 		bytes.NewReader(data), int64(len(data)),
 		minio.PutObjectOptions{ContentType: contentType})

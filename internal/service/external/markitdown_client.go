@@ -64,7 +64,12 @@ func (c *markitdownClient) Convert(filePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			logger.Errorf("关闭文件失败:%s", err)
+		}
+	}(file)
 
 	ctx, cancel := context.WithTimeout(context.Background(), fileConvertTimeout)
 	defer cancel()
@@ -108,7 +113,12 @@ func (c *markitdownClient) ConvertReaderWithContext(ctx context.Context, filenam
 		}
 		return "", fmt.Errorf("请求MarkItDown失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			logger.Errorf("关闭缓冲区失败:%s", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode == http.StatusRequestTimeout {
 		return "", fmt.Errorf("MarkItDown 服务端转换超时")
@@ -188,7 +198,12 @@ func (c *markitdownClient) ConvertFromURLWithContext(ctx context.Context, url st
 			0,
 		)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			logger.Errorf("关闭缓冲区失败:%s", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode == http.StatusRequestTimeout {
 		return "", newConvertError(

@@ -7,6 +7,7 @@ import (
 	"YoudaoNoteLm/internal/repository"
 	"YoudaoNoteLm/internal/service"
 	"YoudaoNoteLm/internal/service/external"
+	externalStorage "YoudaoNoteLm/internal/service/external/storage"
 	"YoudaoNoteLm/pkg/cache"
 	"YoudaoNoteLm/pkg/config"
 	"YoudaoNoteLm/pkg/database"
@@ -163,7 +164,7 @@ func (a *App) initDependencies() error {
 
 	// 创建外部服务客户端（MarkItDown 直接从 config.yaml 读取，不通过 Provider Registry）
 	markitdownClient := external.NewMarkitdownClient(a.cfg.External.MarkItDown.URL)
-	minioStorage, err := external.NewMinIOStorage(
+	minioStorage, err := externalStorage.NewMinIOStorage(
 		a.cfg.External.MinIO.Endpoint,
 		a.cfg.External.MinIO.AccessKey,
 		a.cfg.External.MinIO.SecretKey,
@@ -197,8 +198,8 @@ func (a *App) initDependencies() error {
 	userCfgSvc := service.NewUserConfigService(userConfigRepo, configSvc)
 
 	// 创建搜索 Agent（LLM 客户端在每次请求时通过 ConfigService 获取）
-	searchAgent := searchAgent.NewSearchAgent(configSvc, importerSvc)
-	searchAgentSvc := service.NewSearchAgentService(configSvc, importerSvc, searchAgent)
+	searchagent := searchAgent.NewSearchAgent(configSvc, importerSvc)
+	searchAgentSvc := service.NewSearchAgentService(configSvc, importerSvc, searchagent)
 
 	// 创建有道云笔记 CLI 客户端（支持 .note 格式转换）
 	youdaoCLI := external.NewYoudaoCLI(a.cfg.External.Youdao.CLIPath, a.cfg.External.Youdao.ConverterScriptPath)

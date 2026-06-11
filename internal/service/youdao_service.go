@@ -334,7 +334,9 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 		if taskCtx.Err() != nil {
 			return
 		}
-		s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf("读取失败: %v", err))
+		if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf("读取失败: %v", err)); updateErr != nil {
+			logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+		}
 		return
 	}
 
@@ -343,17 +345,23 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 	// .note 格式必须转换为 Markdown（向量化要求 Markdown 格式）
 	if readResult.RawFormat == "note" {
 		if s.cookiesPath == "" {
-			s.sourceRepo.UpdateStatus(sourceID, "failed", "笔记为 .note 格式，但未配置 cookies 文件路径")
+			if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", "笔记为 .note 格式，但未配置 cookies 文件路径"); updateErr != nil {
+				logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+			}
 			return
 		}
 		logger.Info("笔记为 .note 格式，开始转换为 Markdown", zap.String("file_id", fileID))
 		convertedContent, convertErr := s.cli.ConvertNote(fileID, s.cookiesPath)
 		if convertErr != nil {
-			s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf(".note 格式转换失败: %v", convertErr))
+			if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf(".note 格式转换失败: %v", convertErr)); updateErr != nil {
+				logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+			}
 			return
 		}
 		if strings.TrimSpace(convertedContent) == "" {
-			s.sourceRepo.UpdateStatus(sourceID, "failed", ".note 格式转换后内容为空")
+			if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", ".note 格式转换后内容为空"); updateErr != nil {
+				logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+			}
 			return
 		}
 		content = convertedContent
@@ -375,12 +383,18 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 		if taskCtx.Err() != nil {
 			return
 		}
-		s.sourceRepo.UpdateStatus(sourceID, "failed", "笔记内容为空或格式不支持")
+		if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", "笔记内容为空或格式不支持"); updateErr != nil {
+			logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+		}
 		return
 	}
 
 	// 检查 Source 是否还存在
-	existing, _ := s.sourceRepo.FindByID(sourceID)
+	existing, err := s.sourceRepo.FindByID(sourceID)
+	if err != nil {
+		logger.Warn("查询Source失败", zap.Uint("source_id", sourceID), zap.Error(err))
+		return
+	}
 	if existing == nil {
 		return
 	}
