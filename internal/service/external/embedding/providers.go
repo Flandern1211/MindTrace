@@ -10,7 +10,7 @@ import (
 const ServiceType = "embedding"
 
 // openaiCompatibleEmbeddingFactory 创建 OpenAI 兼容的 Embedding 客户端
-func openaiCompatibleEmbeddingFactory(displayName string) external.FactoryFunc {
+func openaiCompatibleEmbeddingFactory(_ string) external.FactoryFunc {
 	return func(cfg *external.ServiceConfig) (interface{}, error) {
 		model := cfg.Model
 		if model == "" {

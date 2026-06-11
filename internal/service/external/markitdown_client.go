@@ -115,7 +115,10 @@ func (c *markitdownClient) ConvertReaderWithContext(ctx context.Context, filenam
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", fmt.Errorf("MarkItDown返回错误 %d（读取响应体失败: %v）", resp.StatusCode, readErr)
+		}
 		return "", fmt.Errorf("MarkItDown返回错误 %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -155,7 +158,9 @@ func (c *markitdownClient) ConvertFromURLWithContext(ctx context.Context, url st
 	// MarkItDown 服务的 /convert_url 使用 Form 表单
 	formBody := &bytes.Buffer{}
 	writer := multipart.NewWriter(formBody)
-	_ = writer.WriteField("url", url)
+	if err := writer.WriteField("url", url); err != nil {
+		return "", fmt.Errorf("写入表单字段失败: %w", err)
+	}
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("关闭writer失败: %w", err)
 	}
@@ -195,7 +200,10 @@ func (c *markitdownClient) ConvertFromURLWithContext(ctx context.Context, url st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", newConvertError("server_error", "网页内容获取失败", fmt.Sprintf("读取响应体失败: %v", readErr), resp.StatusCode)
+		}
 		detailMsg := fmt.Sprintf("MarkItDown URL转换返回错误 %d: %s", resp.StatusCode, string(respBody))
 
 		// 根据 HTTP 状态码返回用户友好的错误信息

@@ -10,7 +10,7 @@ import (
 const ServiceType = "llm"
 
 // openaiCompatibleFactory 创建 OpenAI 兼容的 LLM 客户端
-func openaiCompatibleFactory(displayName string) external.FactoryFunc {
+func openaiCompatibleFactory(_ string) external.FactoryFunc {
 	return func(cfg *external.ServiceConfig) (interface{}, error) {
 		model := cfg.Model
 		if model == "" {

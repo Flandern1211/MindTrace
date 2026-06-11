@@ -104,7 +104,10 @@ func (h *ConfigHealthChecker) testLLMOpenAICompatible(config *entity.UserConfig)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return &HealthCheckResult{Healthy: false, Message: "读取响应失败", Detail: readErr.Error()}
+	}
 
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
 		return &HealthCheckResult{
@@ -246,7 +249,10 @@ func (h *ConfigHealthChecker) testLLMAnthropic(config *entity.UserConfig) *Healt
 		return &HealthCheckResult{Healthy: true, Message: "Claude API 连通正常"}
 	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return &HealthCheckResult{Healthy: false, Message: "读取响应失败", Detail: readErr.Error()}
+	}
 	return &HealthCheckResult{
 		Healthy: false,
 		Message: fmt.Sprintf("Claude API 返回异常状态码 %d", resp.StatusCode),
@@ -389,7 +395,10 @@ func (h *ConfigHealthChecker) testEmbedding(config *entity.UserConfig) *HealthCh
 		return h.fallbackReachabilityCheck(apiURL)
 	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return &HealthCheckResult{Healthy: false, Message: "读取响应失败", Detail: readErr.Error()}
+	}
 	return &HealthCheckResult{
 		Healthy: false,
 		Message: fmt.Sprintf("API 返回异常状态码 %d", resp.StatusCode),

@@ -64,7 +64,9 @@ func (a *App) Initialize() error {
 	}
 
 	// 4. 初始化依赖
-	a.initDependencies()
+	if err := a.initDependencies(); err != nil {
+		return err
+	}
 
 	// 5. 初始化路由
 	a.initRouter()
@@ -142,7 +144,7 @@ func (a *App) initDatabase() error {
 }
 
 // initDependencies 初始化依赖注入
-func (a *App) initDependencies() {
+func (a *App) initDependencies() error {
 	// 创建 Repository
 	userRepo := repository.NewUserRepository(a.mysqlDB)
 	notebookRepo := repository.NewNotebookRepository(a.mysqlDB)
@@ -161,12 +163,15 @@ func (a *App) initDependencies() {
 
 	// 创建外部服务客户端（MarkItDown 直接从 config.yaml 读取，不通过 Provider Registry）
 	markitdownClient := external.NewMarkitdownClient(a.cfg.External.MarkItDown.URL)
-	minioStorage := external.NewMinIOStorage(
+	minioStorage, err := external.NewMinIOStorage(
 		a.cfg.External.MinIO.Endpoint,
 		a.cfg.External.MinIO.AccessKey,
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
+	if err != nil {
+		return fmt.Errorf("MinIO 初始化失败: %w", err)
+	}
 
 	// 创建 Service（依赖外部客户端）
 	sourceSvc := service.NewSourceService(sourceRepo, minioStorage)
@@ -206,6 +211,8 @@ func (a *App) initDependencies() {
 
 	// 创建 Router
 	a.router = api.NewRouter(userSvc, authSvc, notebookSvc, sourceSvc, importerSvc, adminSvc, userCfgSvc, searchAgentSvc, captchaSvc, tokenBlacklistSvc, configSvc, youdaoSvc)
+
+	return nil
 }
 
 // initRouter 初始化路由

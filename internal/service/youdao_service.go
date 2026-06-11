@@ -177,7 +177,7 @@ func (s *youdaoService) ImportNote(userID uint, notebookID uint, fileID string) 
 	// 4. 异步向量化
 	if s.embedding != nil {
 		go func() {
-			if err := s.embedding.Vectorize(source.ID, readResult.Content); err != nil {
+			if err := s.embedding.Vectorize(source.ID, content); err != nil {
 				logger.Warn("有道笔记向量化失败", zap.Uint("source_id", source.ID), zap.Error(err))
 			} else {
 				if err := s.sourceRepo.SetVectorized(source.ID); err != nil {
