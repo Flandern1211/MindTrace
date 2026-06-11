@@ -185,6 +185,20 @@ func (r *mockSysConfigRepo) Update(config *entity.SysConfig) error {
 	return errors.New("not found")
 }
 
+func (r *mockSysConfigRepo) Delete(id uint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for group, configs := range r.configs {
+		for i, cfg := range configs {
+			if cfg.ID == id {
+				r.configs[group] = append(configs[:i], configs[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return errors.New("not found")
+}
+
 func (r *mockSysConfigRepo) GetConfigStatusSummary() ([]map[string]interface{}, error) {
 	return nil, nil
 }
@@ -310,12 +324,12 @@ func TestGetASRService_UserConfig_CacheHit(t *testing.T) {
 	svc := newTestConfigService(userRepo, sysRepo, cache)
 
 	cfg := entity.UserConfig{
-		UserID:     1,
-		ConfigType: "asr",
-		Provider:   "aliyun_nls",
-		APIKey:     "access_key_id",
+		UserID:      1,
+		ConfigType:  "asr",
+		Provider:    "aliyun_nls",
+		APIKey:      "access_key_id",
 		ExtraConfig: `{"access_key_id":"key","access_key_secret":"secret","app_key":"app"}`,
-		Enabled:    true,
+		Enabled:     true,
 	}
 	cache.Set(context.Background(), "config:user:1:asr", cfg, time.Minute)
 
@@ -335,12 +349,12 @@ func TestGetASRService_UserConfig_DBHit(t *testing.T) {
 	svc := newTestConfigService(userRepo, sysRepo, cache)
 
 	userRepo.Create(&entity.UserConfig{
-		UserID:     1,
-		ConfigType: "asr",
-		Provider:   "aliyun_nls",
-		APIKey:     "key",
+		UserID:      1,
+		ConfigType:  "asr",
+		Provider:    "aliyun_nls",
+		APIKey:      "key",
 		ExtraConfig: `{"access_key_id":"key","access_key_secret":"secret","app_key":"app"}`,
-		Enabled:    true,
+		Enabled:     true,
 	})
 
 	asrSvc, err := svc.GetASRService(1)
@@ -420,11 +434,11 @@ func TestUpdateUserConfig_ClearsCache(t *testing.T) {
 
 	// 预填充缓存
 	cfg := entity.UserConfig{
-		BaseEntity:  entity.BaseEntity{ID: 1},
-		UserID:      1,
-		ConfigType:  "search",
-		Name:        "Old",
-		Enabled:     true,
+		BaseEntity: entity.BaseEntity{ID: 1},
+		UserID:     1,
+		ConfigType: "search",
+		Name:       "Old",
+		Enabled:    true,
 	}
 	cache.Set(context.Background(), "config:user:1:search", cfg, time.Minute)
 

@@ -89,21 +89,6 @@ func (s *minioStorage) GetPresignedURL(filePath string, expiry time.Duration) (s
 	return url.String(), nil
 }
 
-// ensureBucket 确保 bucket 存在（启动时调用）
-func (s *minioStorage) ensureBucket() error {
-	exists, err := s.client.BucketExists(context.Background(), s.bucket)
-	if err != nil {
-		return fmt.Errorf("检查 bucket 失败: %w", err)
-	}
-	if !exists {
-		if err := s.client.MakeBucket(context.Background(), s.bucket, minio.MakeBucketOptions{}); err != nil {
-			return fmt.Errorf("创建 bucket 失败: %w", err)
-		}
-		logger.Info("创建 MinIO bucket", zap.String("bucket", s.bucket))
-	}
-	return nil
-}
-
 // UploadBytes 上传字节数据（用于内部调用）
 func (s *minioStorage) UploadBytes(objectName string, data []byte, contentType string) error {
 	_, err := s.client.PutObject(context.Background(), s.bucket, objectName,

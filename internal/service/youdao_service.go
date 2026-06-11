@@ -309,7 +309,9 @@ func (s *youdaoService) processBatch(taskCtx context.Context, taskID string, api
 				continue
 			}
 			if src.Status == "pending" {
-				s.sourceRepo.UpdateStatus(sourceID, "cancelled", "任务已取消")
+				if err := s.sourceRepo.UpdateStatus(sourceID, "cancelled", "任务已取消"); err != nil {
+					logger.Warn("更新Source状态为cancelled失败", zap.Uint("source_id", sourceID), zap.Error(err))
+				}
 			}
 		}
 	}
@@ -322,7 +324,9 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 	}
 
 	// 更新状态为 processing
-	s.sourceRepo.UpdateStatus(sourceID, "processing", "")
+	if err := s.sourceRepo.UpdateStatus(sourceID, "processing", ""); err != nil {
+		logger.Warn("更新Source状态为processing失败", zap.Uint("source_id", sourceID), zap.Error(err))
+	}
 
 	// 读取笔记内容
 	readResult, err := s.cli.Read(apiKey, fileID)
@@ -385,7 +389,9 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 	existing.MarkdownContent = content
 	existing.Status = "ready"
 	if err := s.sourceRepo.Update(existing); err != nil {
-		s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf("保存失败: %v", err))
+		if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf("保存失败: %v", err)); updateErr != nil {
+			logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+		}
 		return
 	}
 
@@ -395,7 +401,9 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 			if err := s.embedding.Vectorize(sourceID, content); err != nil {
 				logger.Warn("有道笔记批量导入向量化失败", zap.Uint("source_id", sourceID), zap.Error(err))
 			} else {
-				s.sourceRepo.SetVectorized(sourceID)
+				if err := s.sourceRepo.SetVectorized(sourceID); err != nil {
+					logger.Warn("标记向量化状态失败", zap.Uint("source_id", sourceID), zap.Error(err))
+				}
 			}
 		}()
 	}

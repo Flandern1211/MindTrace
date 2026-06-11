@@ -395,14 +395,6 @@ type sysConfigParams struct {
 	APIKey   string `json:"api_key"`
 }
 
-// GetAPIURL 获取 API 地址（兼容 url 和 api_url 两种字段名）
-func (p *sysConfigParams) GetAPIURL() string {
-	if p.APIURL != "" {
-		return p.APIURL
-	}
-	return p.URL
-}
-
 // parseSysConfigValue 解析 sys_config.config_value，兼容 JSON 对象和纯字符串（URL）两种格式
 func parseSysConfigValue(value string) (sysConfigParams, error) {
 	var params sysConfigParams
@@ -510,32 +502,6 @@ func (s *configService) buildChatModelConfig(provider, apiURL, apiKey, model, ex
 		APIKey:   apiKey,
 		Model:    model,
 	}, nil
-}
-
-// createLLMClientFromConfig 根据配置创建 LLM 客户端
-// 保留此方法供 GetChatModelConfig 内部使用
-func (s *configService) createLLMClientFromConfig(provider, apiURL, apiKey, model, extraConfig string) (llm.LLMClient, error) {
-	// 如果显式传入的 model 为空，尝试从 ExtraConfig 中获取
-	if model == "" && extraConfig != "" {
-		var config map[string]interface{}
-		if err := json.Unmarshal([]byte(extraConfig), &config); err == nil {
-			if v, ok := config["model"].(string); ok {
-				model = v
-			}
-		}
-	}
-
-	if model == "" {
-		return nil, bizerrors.New(bizerrors.CodeLLMNotConfigured, "请先在设置中配置 LLM 服务")
-	}
-
-	switch provider {
-	case "openai", "deepseek", "zhipu", "qwen":
-		// 使用 OpenAI 兼容接口
-		return llm.NewOpenAIClient(provider, apiURL, apiKey, model), nil
-	default:
-		return nil, fmt.Errorf("不支持的LLM服务商: %s", provider)
-	}
 }
 
 // getSysConfigs 获取系统配置（带缓存）

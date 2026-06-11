@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -356,26 +357,29 @@ func (s *importerService) convertAudioForASR(file *multipart.FileHeader, filePat
 // ImportSearchResults 批量导入搜索结果
 // 为每个 URL 先创建 pending 状态的 Source 记录，然后异步处理
 // 返回创建的 Source ID 列表，前端可通过 Source 列表 API 查看每条的独立状态
-func (s *importerService) ImportSearchResults(userID, notebookID uint, urls []string) (string, []uint, error) {
-	// 去重：同一个 URL 只创建一条记录
-	seen := make(map[string]struct{}, len(urls))
-	uniqueURLs := make([]string, 0, len(urls))
-	for _, url := range urls {
-		if _, exists := seen[url]; exists {
-			continue
+func (s *importerService) ImportSearchResults(userID, notebookID uint, items []SearchResultItem) (string, []uint, error) {
+	// 去重：同一个 URL 只创建一条记录（保留第一次出现的标题）
+	seen := make(map[string]string, len(items)) // url -> title
+	for _, item := range items {
+		if _, exists := seen[item.URL]; !exists {
+			seen[item.URL] = item.Title
 		}
-		seen[url] = struct{}{}
-		uniqueURLs = append(uniqueURLs, url)
 	}
 
-	sourceIDs := make([]uint, 0, len(uniqueURLs))
+	sourceIDs := make([]uint, 0, len(seen))
 
 	// 为每个 URL 创建 pending 状态的 Source
-	for _, url := range uniqueURLs {
+	for url, title := range seen {
+		// 如果标题为空，使用 URL 作为标题
+		name := title
+		if name == "" {
+			name = url
+		}
+
 		source := &entity.Source{
 			UserID:      userID,
 			NotebookID:  notebookID,
-			Name:        url,
+			Name:        name,
 			Type:        "url",
 			OriginalURL: url,
 			Status:      "pending",
@@ -489,8 +493,27 @@ func (s *importerService) processSingleSource(taskCtx context.Context, sourceID 
 			logger.Info("任务已取消，跳过Source处理", zap.Uint("source_id", sourceID))
 			return
 		}
-		logger.Warn("URL转换失败", zap.String("url", source.OriginalURL), zap.Error(err))
-		if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", fmt.Sprintf("转换失败: %v", err)); updateErr != nil {
+
+		// 处理结构化错误，返回用户友好的错误信息
+		var userMsg string
+		var convertErr *external.ConvertError
+		if errors.As(err, &convertErr) {
+			// 记录详细的技术错误信息到日志
+			logger.Warn("URL转换失败",
+				zap.String("url", source.OriginalURL),
+				zap.String("error_code", convertErr.Code),
+				zap.String("detail", convertErr.DetailMsg),
+				zap.Int("http_status", convertErr.HTTPStatus),
+			)
+			// 使用用户友好的错误消息
+			userMsg = convertErr.UserMsg
+		} else {
+			// 未知错误类型
+			logger.Warn("URL转换失败", zap.String("url", source.OriginalURL), zap.Error(err))
+			userMsg = "网页内容获取失败，请稍后重试"
+		}
+
+		if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", userMsg); updateErr != nil {
 			logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
 		}
 		return

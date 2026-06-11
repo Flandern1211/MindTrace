@@ -24,17 +24,6 @@ func (c *ServiceConfig) GetExtraString(key string) string {
 	return ""
 }
 
-// GetExtraInt 从 ExtraConfig 获取整数值
-func (c *ServiceConfig) GetExtraInt(key string) int {
-	if c.ExtraConfig == nil {
-		return 0
-	}
-	if v, ok := c.ExtraConfig[key].(float64); ok {
-		return int(v)
-	}
-	return 0
-}
-
 // ParseExtraConfig 从 JSON 字符串解析 ExtraConfig
 func (c *ServiceConfig) ParseExtraConfig(jsonStr string) {
 	if jsonStr == "" {

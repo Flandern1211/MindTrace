@@ -127,7 +127,33 @@ func (ctrl *Controller) ImportSearchResults(c *gin.Context) {
 		return
 	}
 
-	taskID, sourceIDs, err := ctrl.searchService.ImportSearchResults(userID, uint(nbID), req.URLs)
+	// 自定义验证：URLs 和 Items 至少有一个
+	if !req.Validate() {
+		response.BadRequest(c, "导入列表为空，请提供 urls 或 items")
+		return
+	}
+
+	// 转换为 service.SearchResultItem
+	var items []service.SearchResultItem
+
+	// 优先使用 Items（带标题）
+	if len(req.Items) > 0 {
+		items = make([]service.SearchResultItem, len(req.Items))
+		for i, item := range req.Items {
+			items[i] = service.SearchResultItem{
+				Title: item.Title,
+				URL:   item.URL,
+			}
+		}
+	} else if len(req.URLs) > 0 {
+		// 兼容旧接口：纯URL列表
+		items = make([]service.SearchResultItem, len(req.URLs))
+		for i, url := range req.URLs {
+			items[i] = service.SearchResultItem{URL: url}
+		}
+	}
+
+	taskID, sourceIDs, err := ctrl.searchService.ImportSearchResults(userID, uint(nbID), items)
 	if err != nil {
 		response.BizError(c, err)
 		return

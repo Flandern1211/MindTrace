@@ -43,8 +43,8 @@ type SearchAgentService interface {
 	SearchStream(userID, notebookID uint, query string) <-chan *SearchAgentEvent
 	// ImportFromURL URL 直接导入（返回任务 ID 和 Source ID）
 	ImportFromURL(userID, notebookID uint, url string) (taskID string, sourceID uint, err error)
-	// ImportSearchResults 批量导入 URL 列表，返回任务 ID 和创建的 Source ID 列表
-	ImportSearchResults(userID, notebookID uint, urls []string) (taskID string, sourceIDs []uint, err error)
+	// ImportSearchResults 批量导入搜索结果（带标题），返回任务 ID 和创建的 Source ID 列表
+	ImportSearchResults(userID, notebookID uint, items []SearchResultItem) (taskID string, sourceIDs []uint, err error)
 	// SearchAndImport 搜索并自动导入：Agent 自主执行多轮搜索并自动导入结果（主Agent调用模式）
 	SearchAndImport(userID, notebookID uint, query string) (*response.SearchResponse, error)
 }

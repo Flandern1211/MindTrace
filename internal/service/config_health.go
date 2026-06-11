@@ -157,7 +157,7 @@ func (h *ConfigHealthChecker) testLLMOpenAICompatible(config *entity.UserConfig)
 
 	// /models 不支持时，回退到简单可达性检查
 	if resp.StatusCode == 404 || resp.StatusCode == 405 {
-		return h.fallbackReachabilityCheck(apiURL, config.APIKey)
+		return h.fallbackReachabilityCheck(apiURL)
 	}
 
 	return &HealthCheckResult{
@@ -168,7 +168,7 @@ func (h *ConfigHealthChecker) testLLMOpenAICompatible(config *entity.UserConfig)
 }
 
 // fallbackReachabilityCheck 回退的可达性检查
-func (h *ConfigHealthChecker) fallbackReachabilityCheck(apiURL, apiKey string) *HealthCheckResult {
+func (h *ConfigHealthChecker) fallbackReachabilityCheck(apiURL string) *HealthCheckResult {
 	if err := checkHTTPReachable(apiURL, 3*time.Second); err != nil {
 		return &HealthCheckResult{Healthy: false, Message: "API 地址不可达", Detail: err.Error()}
 	}
@@ -386,7 +386,7 @@ func (h *ConfigHealthChecker) testEmbedding(config *entity.UserConfig) *HealthCh
 
 	// /models 不支持时回退
 	if resp.StatusCode == 404 || resp.StatusCode == 405 {
-		return h.fallbackReachabilityCheck(apiURL, config.APIKey)
+		return h.fallbackReachabilityCheck(apiURL)
 	}
 
 	respBody, _ := io.ReadAll(resp.Body)

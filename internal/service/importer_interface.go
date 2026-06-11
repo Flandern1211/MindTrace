@@ -10,6 +10,12 @@ type EmbeddingService interface {
 	Vectorize(sourceID uint, content string) error
 }
 
+// SearchResultItem 搜索结果项（用于导入时保留标题）
+type SearchResultItem struct {
+	Title string // 标题
+	URL   string // URL
+}
+
 // ImporterService 导入服务接口
 type ImporterService interface {
 	ImportFile(userID, notebookID uint, file *multipart.FileHeader) (*entity.Source, error)
@@ -19,7 +25,7 @@ type ImporterService interface {
 	GetAudioPreviewStatus(userID uint, previewID string) (interface{}, error)
 	ConfirmAudio(userID uint, previewID string, editedContent *string) (*entity.Source, error)
 	// ImportSearchResults 批量导入搜索结果，返回任务 ID 和创建的 Source ID 列表
-	ImportSearchResults(userID, notebookID uint, urls []string) (taskID string, sourceIDs []uint, err error)
+	ImportSearchResults(userID, notebookID uint, items []SearchResultItem) (taskID string, sourceIDs []uint, err error)
 	GetImportTask(taskID string) (interface{}, error)
 	DeleteImportTask(taskID string) error // 删除导入任务
 }

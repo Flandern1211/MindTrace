@@ -17,10 +17,32 @@ import (
 	"go.uber.org/zap"
 )
 
+// ConvertError 转换错误，包含用户友好的消息
+type ConvertError struct {
+	Code       string // 错误码：timeout, network, forbidden, not_found, server_error, unknown
+	UserMsg    string // 用户友好的错误消息
+	DetailMsg  string // 详细技术信息（用于日志）
+	HTTPStatus int    // HTTP 状态码（如果适用）
+}
+
+func (e *ConvertError) Error() string {
+	return e.DetailMsg
+}
+
+// newConvertError 创建转换错误
+func newConvertError(code, userMsg, detailMsg string, httpStatus int) *ConvertError {
+	return &ConvertError{
+		Code:       code,
+		UserMsg:    userMsg,
+		DetailMsg:  detailMsg,
+		HTTPStatus: httpStatus,
+	}
+}
+
 const (
-	defaultTimeout     = 30 * time.Second // 默认超时
-	fileConvertTimeout = 30 * time.Second // 文件转换超时
-	urlConvertTimeout  = 20 * time.Second // URL 转换超时
+	defaultTimeout     = 60 * time.Second // 默认超时
+	fileConvertTimeout = 60 * time.Second // 文件转换超时
+	urlConvertTimeout  = 45 * time.Second // URL 转换超时（网页抓取需要更多时间）
 )
 
 type markitdownClient struct {
@@ -147,19 +169,54 @@ func (c *markitdownClient) ConvertFromURLWithContext(ctx context.Context, url st
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("请求MarkItDown URL转换超时（%v）", urlConvertTimeout)
+			return "", newConvertError(
+				"timeout",
+				"网页内容获取超时，请稍后重试或检查网址是否可访问",
+				fmt.Sprintf("请求MarkItDown URL转换超时（%v）", urlConvertTimeout),
+				0,
+			)
 		}
-		return "", fmt.Errorf("请求MarkItDown URL转换失败: %w", err)
+		return "", newConvertError(
+			"network",
+			"网络连接失败，请检查网络后重试",
+			fmt.Sprintf("请求MarkItDown URL转换失败: %v", err),
+			0,
+		)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusRequestTimeout {
-		return "", fmt.Errorf("MarkItDown 服务端转换超时")
+		return "", newConvertError(
+			"timeout",
+			"网页内容获取超时，请稍后重试",
+			"MarkItDown 服务端转换超时",
+			http.StatusRequestTimeout,
+		)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("MarkItDown URL转换返回错误 %d: %s", resp.StatusCode, string(respBody))
+		detailMsg := fmt.Sprintf("MarkItDown URL转换返回错误 %d: %s", resp.StatusCode, string(respBody))
+
+		// 根据 HTTP 状态码返回用户友好的错误信息
+		var userMsg string
+		var code string
+		switch resp.StatusCode {
+		case http.StatusForbidden:
+			code = "forbidden"
+			userMsg = "网页拒绝访问，该网站可能限制了外部访问"
+		case http.StatusNotFound:
+			code = "not_found"
+			userMsg = "网页不存在，请检查网址是否正确"
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			code = "server_error"
+			userMsg = "网页服务暂时不可用，请稍后重试"
+		default:
+			code = "server_error"
+			userMsg = "网页内容获取失败，请稍后重试"
+		}
+
+		return "", newConvertError(code, userMsg, detailMsg, resp.StatusCode)
 	}
 
 	respBody, err := io.ReadAll(resp.Body)

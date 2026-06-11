@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,7 +82,7 @@ func (c *youdaoNoteConverter) ConvertNote(fileID string, cookiesPath string) (st
 	}
 
 	if result.Error != "" {
-		return "", fmt.Errorf(result.Error)
+		return "", errors.New(result.Error)
 	}
 
 	if result.Content == "" {

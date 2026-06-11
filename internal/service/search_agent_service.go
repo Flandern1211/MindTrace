@@ -53,7 +53,9 @@ func (s *searchAgentService) SearchStream(userID, notebookID uint, query string)
 
 // ImportFromURL URL 直接导入（返回任务 ID 和 Source ID）
 func (s *searchAgentService) ImportFromURL(userID, notebookID uint, url string) (string, uint, error) {
-	taskID, sourceIDs, err := s.importer.ImportSearchResults(userID, notebookID, []string{url})
+	taskID, sourceIDs, err := s.importer.ImportSearchResults(userID, notebookID, []SearchResultItem{
+		{URL: url},
+	})
 	if err != nil {
 		return "", 0, err
 	}
@@ -72,8 +74,8 @@ func (s *searchAgentService) ImportFromURL(userID, notebookID uint, url string) 
 }
 
 // ImportSearchResults 批量导入
-func (s *searchAgentService) ImportSearchResults(userID, notebookID uint, urls []string) (string, []uint, error) {
-	return s.importer.ImportSearchResults(userID, notebookID, urls)
+func (s *searchAgentService) ImportSearchResults(userID, notebookID uint, items []SearchResultItem) (string, []uint, error) {
+	return s.importer.ImportSearchResults(userID, notebookID, items)
 }
 
 // SearchAndImport 搜索并自动导入（主Agent调用模式）
