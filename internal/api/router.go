@@ -3,6 +3,8 @@ package api
 import (
 	"YoudaoNoteLm/internal/api/v1/admin"
 	"YoudaoNoteLm/internal/api/v1/auth"
+	"YoudaoNoteLm/internal/api/v1/chat"
+	"YoudaoNoteLm/internal/api/v1/generation"
 	"YoudaoNoteLm/internal/api/v1/importn"
 	"YoudaoNoteLm/internal/api/v1/notebook"
 	"YoudaoNoteLm/internal/api/v1/providers"
@@ -23,10 +25,11 @@ type Router struct {
 	authCtrl       *auth.Controller
 	notebookCtrl   *notebook.Controller
 	sourceCtrl     *source.Controller
+	generationCtrl *generation.Controller
+	chatCtrl       *chat.Controller
 	tokenBlacklist service.TokenBlacklistService
 	importCtrl     *importn.Controller
 	adminCtrl      *admin.Controller
-	userCfgCtrl    *user_config.Controller
 	searchCtrl     *search.Controller
 	providerCtrl   *providers.Controller
 	youdaoCtrl     *youdao.Controller
@@ -38,12 +41,15 @@ func NewRouter(
 	authService service.AuthService,
 	notebookService service.NotebookService,
 	sourceService service.SourceService,
+	searchService service.SearchService,
+	generationService service.GenerationService,
 	importerService service.ImporterService,
 	adminService service.AdminService,
 	userConfigService service.UserConfigService,
 	searchAgentService service.SearchAgentService,
 	captchaSvc service.CaptchaService,
 	tokenBlacklist service.TokenBlacklistService,
+	chatAgentService service.ChatAgentService,
 	configService service.ConfigService,
 	youdaoService service.YoudaoService,
 ) *Router {
@@ -52,11 +58,12 @@ func NewRouter(
 		authCtrl:       auth.NewController(authService, userService, captchaSvc),
 		notebookCtrl:   notebook.NewController(notebookService),
 		sourceCtrl:     source.NewController(sourceService, tokenBlacklist),
+		generationCtrl: generation.NewController(generationService),
+		chatCtrl:       chat.NewController(chatAgentService),
 		tokenBlacklist: tokenBlacklist,
 		importCtrl:     importn.NewController(importerService),
 		searchCtrl:     search.NewController(searchAgentService, tokenBlacklist),
 		adminCtrl:      admin.NewController(adminService),
-		userCfgCtrl:    user_config.NewController(userConfigService, tokenBlacklist),
 		providerCtrl:   providers.NewController(configService),
 		youdaoCtrl:     youdao.NewController(youdaoService),
 	}
@@ -64,15 +71,12 @@ func NewRouter(
 
 // Setup 注册所有路由。
 func (r *Router) Setup(engine *gin.Engine) {
-	// 全局中间件
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.Logger())
 	engine.Use(middleware.CORS())
 
-	// 静态文件服务（头像等）
 	engine.Static("/uploads", "./uploads")
 
-	// 健康检查
 	engine.GET("/api/v1/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "ok",
@@ -80,29 +84,21 @@ func (r *Router) Setup(engine *gin.Engine) {
 		})
 	})
 
-	// API v1 路由组
 	v1 := engine.Group("/api/v1")
 	{
-		// 认证路由
 		r.authCtrl.RegisterRoutes(v1)
-
-		// 用户路由
 		r.userCtrl.RegisterRoutes(v1)
-
-		// 笔记本路由
 		r.notebookCtrl.RegisterRoutes(v1, r.tokenBlacklist)
-
-		// 资料来源路由（需认证）
 		r.sourceCtrl.RegisterRoutes(v1)
+		r.searchCtrl.RegisterRoutes(v1)
+		r.generationCtrl.RegisterRoutes(v1, r.tokenBlacklist)
 
 		// 导入路由（需认证）
 		r.importCtrl.RegisterRoutes(v1, r.tokenBlacklist)
+		r.chatCtrl.RegisterRoutes(v1, r.tokenBlacklist)
 
 		// 后台管理路由（需认证）
 		r.adminCtrl.RegisterRoutes(v1)
-
-		// 用户配置路由（需认证）
-		r.userCfgCtrl.RegisterRoutes(v1)
 
 		// 搜索路由（需认证）
 		r.searchCtrl.RegisterRoutes(v1)
