@@ -229,17 +229,7 @@ func (a *App) initDependencies() {
 		audioPreviewCache,
 		ingestionSvc,
 	)
-	generationModel, err := service.NewConfiguredGenerationModel(context.Background(), a.cfg.External.LLM)
-	if err != nil {
-		logger.Warn("main llm unavailable, generation agents will use fallback", zap.Error(err))
-	}
-	if generationModel != nil {
-		logger.Info("main llm initialized for generation agents",
-			zap.String("provider", a.cfg.External.LLM.Provider),
-			zap.String("model", a.cfg.External.LLM.Model),
-		)
-	}
-	generationSvc := service.NewGenerationService(a.ragRetriever, searchSvc, generationModel)
+	generationSvc := service.NewGenerationServiceWithUserLLMConfig(a.ragRetriever, searchSvc, llmConfigRepo)
 
 	// 创建 ChatAgentService
 	var chatAgentSvc service.ChatAgentService
