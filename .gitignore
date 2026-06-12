@@ -82,3 +82,13 @@ test_output.txt
 test_result.txt
 test_*.ps1
 tasks.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Test screenshots
+frontend/test-screenshots/
