@@ -1,8 +1,6 @@
 package app
 
 import (
-	"YoudaoNoteLm/internal/api"
-	"Youd
 	"context"
 	"fmt"
 	"net/http"
@@ -10,8 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
 	"YoudaoNoteLm/internal/api"
+	"YoudaoNoteLm/internal/model/entity"
 	"YoudaoNoteLm/internal/rag"
+	"YoudaoNoteLm/internal/repository"
+	"YoudaoNoteLm/internal/service"
 	"YoudaoNoteLm/internal/service/external"
 	"YoudaoNoteLm/pkg/cache"
 	"YoudaoNoteLm/pkg/config"
@@ -33,6 +35,10 @@ type App struct {
 	router       *api.Router
 	server       *http.Server
 	ragRetriever rag.RAGRetriever
+}
+
+func milvusInitContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
 // NewApp 创建应用。
@@ -187,9 +193,11 @@ func (a *App) initDependencies() {
 		}
 
 		// 创建独立的 MilvusWriter 用于检索（Milvus 客户端轻量）
-		milvusWriter, err := rag.NewMilvusWriter(context.Background(), rag.MilvusIndexerConfig{
+		milvusCtx, milvusCancel := milvusInitContext()
+		milvusWriter, err := rag.NewMilvusWriter(milvusCtx, rag.MilvusIndexerConfig{
 			Address: a.cfg.External.Milvus.Address,
 		})
+		milvusCancel()
 		if err != nil {
 			logger.Warn("Milvus Writer 初始化失败，RAGRetriever 不可用", zap.Error(err))
 		} else {
@@ -217,6 +225,7 @@ func (a *App) initDependencies() {
 		audioPreviewCache,
 		ingestionSvc,
 	)
+	generationSvc := service.NewGenerationService(a.ragRetriever, searchSvc, nil)
 
 	a.router = api.NewRouter(
 		userSvc,
@@ -224,6 +233,7 @@ func (a *App) initDependencies() {
 		notebookSvc,
 		sourceSvc,
 		searchSvc,
+		generationSvc,
 		importerSvc,
 		captchaSvc,
 		tokenBlacklistSvc,
@@ -233,7 +243,8 @@ func (a *App) initDependencies() {
 // initIngestionService 初始化入库服务
 // 从数据库读取用户的 Embedding 配置，创建 EmbedderProvider 和 MilvusWriter
 func (a *App) initIngestionService(sourceRepo repository.SourceRepository) rag.IngestionService {
-	ctx := context.Background()
+	ctx, cancel := milvusInitContext()
+	defer cancel()
 
 	// 创建 Milvus Writer
 	milvusWriter, err := rag.NewMilvusWriter(ctx, rag.MilvusIndexerConfig{
