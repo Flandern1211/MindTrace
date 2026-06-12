@@ -6,8 +6,6 @@ import (
 	"YoudaoNoteLm/internal/api/v1/importn"
 	"YoudaoNoteLm/internal/api/v1/notebook"
 	"YoudaoNoteLm/internal/api/v1/providers"
-	search "YoudaoNoteLm/internal/api/v1/search"
-	"YoudaoNoteLm/internal/api/v1/notebook"
 	"YoudaoNoteLm/internal/api/v1/search"
 	"YoudaoNoteLm/internal/api/v1/source"
 	"YoudaoNoteLm/internal/api/v1/user"

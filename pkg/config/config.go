@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Config 应用配置结构体
 type Config struct {
@@ -11,6 +14,18 @@ type Config struct {
 	CORS     CORSConfig     `mapstructure:"cors"`
 	Email    EmailConfig    `mapstructure:"email"`
 	External ExternalConfig `mapstructure:"external"`
+	Milvus   MilvusConfig   `mapstructure:"milvus"`
+}
+
+// MilvusConfig Milvus 向量数据库配置
+type MilvusConfig struct {
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+}
+
+// GetAddress 返回 host:port 格式的地址
+func (c *MilvusConfig) GetAddress() string {
+	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
 // ExternalConfig 外部服务配置

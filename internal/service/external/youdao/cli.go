@@ -49,6 +49,8 @@ type CLI interface {
 	DeleteNote(apiKey string, fileID string) error
 	// ConvertNote 将 .note 格式转换为 Markdown（需要 cookiesPath）
 	ConvertNote(fileID string, cookiesPath string) (string, error)
+	// ConvertToMarkdown 将 XML/JSON 内容转换为 Markdown
+	ConvertToMarkdown(content string, formatType string) (string, error)
 }
 
 // youdaoCLI CLI 实现
@@ -415,10 +417,20 @@ func (c *youdaoCLI) DeleteNote(apiKey string, fileID string) error {
 	return err
 }
 
-// ConvertNote 将 .note 格式转换为 Markdown（使用 youdaonote-pull 的 Python 脚本）
+// ConvertNote 将 .note 格式转换为 Markdown（使用 Python 脚本）
 func (c *youdaoCLI) ConvertNote(fileID string, cookiesPath string) (string, error) {
 	if c.converter == nil {
 		return "", fmt.Errorf("转换器未初始化，请配置 converter_script_path")
 	}
-	return c.converter.ConvertNote(fileID, cookiesPath)
+	// 注意：此方法需要先获取文件内容，然后调用转换器
+	// 这里保留接口兼容性，实际转换逻辑需要在调用处处理
+	return "", fmt.Errorf("请使用 ConvertToMarkdown 方法直接转换内容")
+}
+
+// ConvertToMarkdown 将 XML/JSON 内容转换为 Markdown
+func (c *youdaoCLI) ConvertToMarkdown(content string, formatType string) (string, error) {
+	if c.converter == nil {
+		return "", fmt.Errorf("转换器未初始化，请配置 converter_script_path")
+	}
+	return c.converter.ConvertToMarkdown(content, formatType)
 }
