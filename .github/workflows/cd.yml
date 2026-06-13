@@ -70,7 +70,18 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cd /home/flandern/youdaonote
+            DEPLOY_DIR="/home/flandern/youdaonote"
+
+            # 创建目录（如果不存在）
+            mkdir -p "$DEPLOY_DIR/configs"
+
+            # 首次部署：下载 docker-compose.yml
+            if [ ! -f "$DEPLOY_DIR/docker-compose.yml" ]; then
+              curl -fsSL "https://raw.githubusercontent.com/Flandern1211/YoudaoNoteLM/develop/docs/deploy/docker-compose.yml" -o "$DEPLOY_DIR/docker-compose.yml"
+              echo "✅ docker-compose.yml downloaded"
+            fi
+
+            cd "$DEPLOY_DIR"
 
             # Docker Hub 登录
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -150,7 +161,18 @@ jobs:
           key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cd /home/flandern/youdaonote
+            DEPLOY_DIR="/home/flandern/youdaonote"
+
+            # 创建目录（如果不存在）
+            mkdir -p "$DEPLOY_DIR/configs"
+
+            # 首次部署：下载 docker-compose.yml
+            if [ ! -f "$DEPLOY_DIR/docker-compose.yml" ]; then
+              curl -fsSL "https://raw.githubusercontent.com/Flandern1211/YoudaoNoteLM/develop/docs/deploy/docker-compose.yml" -o "$DEPLOY_DIR/docker-compose.yml"
+              echo "✅ docker-compose.yml downloaded"
+            fi
+
+            cd "$DEPLOY_DIR"
 
             # Docker Hub 登录
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
