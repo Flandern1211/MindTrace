@@ -43,6 +43,7 @@ desktop.ini
 # Cache
 .eslintcache
 *.tsbuildinfo
+.vite/
 
 # Testing
 coverage/
