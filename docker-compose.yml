@@ -170,9 +170,7 @@ services:
 
   # ========== MarkItDown 文档转换服务 ==========
   markitdown:
-    build:
-      context: ./markitdown_service
-      dockerfile: Dockerfile
+    image: flandern/markitdown:latest
     container_name: youdaonote-markitdown
     ports:
       - "${MARKITDOWN_PORT:-8085}:8085"
