@@ -31,15 +31,15 @@ func TestNewASRServiceFromDB_AliyunNLS(t *testing.T) {
 
 func TestNewASRServiceFromDB_AliyunNLS_EmptyExtraConfig(t *testing.T) {
 	svc := NewASRServiceFromDB("aliyun_nls", "", "key", "")
-	if svc == nil {
-		t.Fatal("expected non-nil even with empty extra config")
+	if svc != nil {
+		t.Fatal("expected nil with empty extra config (missing required fields)")
 	}
 }
 
 func TestNewASRServiceFromDB_AliyunNLS_InvalidJSON(t *testing.T) {
 	svc := NewASRServiceFromDB("aliyun_nls", "", "key", "not-json")
-	if svc == nil {
-		t.Fatal("expected non-nil even with invalid JSON")
+	if svc != nil {
+		t.Fatal("expected nil with invalid JSON")
 	}
 }
 

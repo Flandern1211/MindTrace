@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	fmt.Println("=== 音频接口完整测试 ===\n")
+	fmt.Println("=== 音频接口完整测试 ===")
 
 	// 加载配置并生成 token
 	if _, err := config.Load(""); err != nil {

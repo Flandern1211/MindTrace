@@ -78,7 +78,7 @@ func main() {
 			fmt.Printf("❌ 失败: %v\n\n", err)
 			failed++
 		} else {
-			fmt.Println("✅ 通过\n")
+			fmt.Println("✅ 通过")
 			passed++
 		}
 	}
