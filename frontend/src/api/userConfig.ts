@@ -19,6 +19,19 @@ export interface UserConfig {
   updated_at: string;
 }
 
+export interface UserLLMConfig {
+  id: number;
+  user_id: number;
+  name: string;
+  provider: string;
+  api_key: string;
+  api_url: string;
+  model: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserConfigRequest {
   name: string;
   provider: string;
@@ -42,7 +55,7 @@ export interface HealthCheckResult {
 
 export async function listLLMConfigs(): Promise<{
   code: number;
-  data: UserConfig[];
+  data: UserLLMConfig[];
   message?: string;
 }> {
   const res = await client.get('/user/config/llm');
@@ -51,7 +64,7 @@ export async function listLLMConfigs(): Promise<{
 
 export async function createLLMConfig(
   data: UserConfigRequest
-): Promise<{ code: number; data: UserConfig; message?: string }> {
+): Promise<{ code: number; data: UserLLMConfig; message?: string }> {
   const res = await client.post('/user/config/llm', data);
   return res.data;
 }
@@ -59,7 +72,7 @@ export async function createLLMConfig(
 export async function updateLLMConfig(
   id: number,
   data: UserConfigRequest
-): Promise<{ code: number; data: UserConfig; message?: string }> {
+): Promise<{ code: number; data: UserLLMConfig; message?: string }> {
   const res = await client.put(`/user/config/llm/${id}`, data);
   return res.data;
 }

@@ -4,10 +4,10 @@ import "YoudaoNoteLm/internal/model/entity"
 
 // UserConfigService 用户配置服务接口
 type UserConfigService interface {
-	// LLM 配置（基础模型，必需）
-	ListLLMConfigs(userID uint) ([]*entity.UserConfig, error)
-	CreateLLMConfig(userID uint, config *entity.UserConfig) error
-	UpdateLLMConfig(id uint, config *entity.UserConfig) error
+	// LLM 配置（独立表 user_llm_config，支持多条）
+	ListLLMConfigs(userID uint) ([]*entity.UserLLMConfig, error)
+	CreateLLMConfig(userID uint, config *entity.UserLLMConfig) error
+	UpdateLLMConfig(id uint, config *entity.UserLLMConfig) error
 	DeleteLLMConfig(id uint) error
 
 	// 搜索配置

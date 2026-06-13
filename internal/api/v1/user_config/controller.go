@@ -90,14 +90,15 @@ func (ctrl *Controller) CreateLLMConfig(c *gin.Context) {
 		return
 	}
 
-	config := &entity.UserConfig{
+	config := &entity.UserLLMConfig{
 		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
-		APIURL: req.APIURL, Model: req.Model,
-		ExtraConfig: string(req.ExtraConfig), Enabled: true,
+		APIURL: req.APIURL, Model: req.Model, Enabled: true,
 	}
 
 	// 保存前验证连通性
-	if !ctrl.validateBeforeSave(c, "llm", config) {
+	if !ctrl.validateBeforeSave(c, "llm", &entity.UserConfig{
+		Provider: req.Provider, APIKey: req.APIKey, APIURL: req.APIURL, Model: req.Model,
+	}) {
 		return
 	}
 
@@ -120,10 +121,9 @@ func (ctrl *Controller) UpdateLLMConfig(c *gin.Context) {
 		return
 	}
 
-	config := &entity.UserConfig{
+	config := &entity.UserLLMConfig{
 		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
 		APIURL: req.APIURL, Model: req.Model,
-		ExtraConfig: string(req.ExtraConfig),
 	}
 
 	if req.Enabled != nil {
@@ -133,7 +133,9 @@ func (ctrl *Controller) UpdateLLMConfig(c *gin.Context) {
 	}
 
 	// 保存前验证连通性
-	if !ctrl.validateBeforeSave(c, "llm", config) {
+	if !ctrl.validateBeforeSave(c, "llm", &entity.UserConfig{
+		Provider: req.Provider, APIKey: req.APIKey, APIURL: req.APIURL, Model: req.Model,
+	}) {
 		return
 	}
 

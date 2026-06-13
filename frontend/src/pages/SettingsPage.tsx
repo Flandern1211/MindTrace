@@ -13,7 +13,7 @@ import Badge from '../components/ui/Badge';
 import * as userConfigApi from '../api/userConfig';
 import * as providersApi from '../api/providers';
 import * as youdaoApi from '../api/youdao';
-import type { UserConfig, UserConfigRequest } from '../api/userConfig';
+import type { UserConfig, UserLLMConfig, UserConfigRequest } from '../api/userConfig';
 import type { ProviderInfo } from '../api/providers';
 import type { YoudaoBindStatus } from '../api/youdao';
 import { getErrorMessage } from '../utils/error';
@@ -28,7 +28,7 @@ export default function SettingsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [llmConfigs, setLlmConfigs] = useState<UserConfig[]>([]);
+  const [llmConfigs, setLlmConfigs] = useState<UserLLMConfig[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [activeProvider, setActiveProvider] = useState<{source: string; provider: string; display_name: string} | null>(null);
 
