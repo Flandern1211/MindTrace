@@ -118,6 +118,10 @@ func (s *youdaoService) ImportNote(userID uint, notebookID uint, fileID string) 
 
 	// .note 格式必须转换为 Markdown（向量化要求 Markdown 格式）
 	if readResult.RawFormat == "note" {
+		// 空笔记无需转换，直接返回空内容，由调用方处理
+		if content == "" && s.cookiesPath == "" {
+			return nil, fmt.Errorf("笔记内容为空")
+		}
 		if s.cookiesPath == "" {
 			return nil, fmt.Errorf("笔记为 .note 格式，但未配置 cookies 文件路径，无法转换")
 		}
@@ -339,6 +343,14 @@ func (s *youdaoService) processSingleNote(taskCtx context.Context, apiKey string
 
 	// .note 格式必须转换为 Markdown（向量化要求 Markdown 格式）
 	if readResult.RawFormat == "note" {
+		// 空笔记无需转换，跳过入库
+		if content == "" && s.cookiesPath == "" {
+			logger.Info("笔记内容为空，跳过入库", zap.String("file_id", fileID))
+			if updateErr := s.sourceRepo.UpdateStatus(sourceID, "ready", ""); updateErr != nil {
+				logger.Warn("更新Source状态失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))
+			}
+			return
+		}
 		if s.cookiesPath == "" {
 			if updateErr := s.sourceRepo.UpdateStatus(sourceID, "failed", "笔记为 .note 格式，但未配置 cookies 文件路径"); updateErr != nil {
 				logger.Warn("更新Source状态为failed失败", zap.Uint("source_id", sourceID), zap.Error(updateErr))

@@ -5,6 +5,97 @@ import (
 	"time"
 )
 
+// Validate 校验所有必填配置项，缺失或无效时返回 error。
+func (c *Config) Validate() error {
+	// App
+	if c.App.Name == "" {
+		return fmt.Errorf("app.name 不能为空")
+	}
+	if c.App.Port == 0 {
+		return fmt.Errorf("app.port 不能为空")
+	}
+
+	// MySQL
+	if c.Database.MySQL.Host == "" {
+		return fmt.Errorf("database.mysql.host 不能为空")
+	}
+	if c.Database.MySQL.Port == 0 {
+		return fmt.Errorf("database.mysql.port 不能为空")
+	}
+	if c.Database.MySQL.Username == "" {
+		return fmt.Errorf("database.mysql.username 不能为空")
+	}
+	if c.Database.MySQL.Database == "" {
+		return fmt.Errorf("database.mysql.database 不能为空")
+	}
+
+	// Redis
+	if c.Database.Redis.Host == "" {
+		return fmt.Errorf("database.redis.host 不能为空")
+	}
+	if c.Database.Redis.Port == 0 {
+		return fmt.Errorf("database.redis.port 不能为空")
+	}
+
+	// JWT
+	if c.JWT.Secret == "" {
+		return fmt.Errorf("jwt.secret 不能为空")
+	}
+
+	// Log
+	if c.Log.Filename == "" {
+		return fmt.Errorf("log.filename 不能为空")
+	}
+
+	// Email
+	if c.Email.Host == "" {
+		return fmt.Errorf("email.host 不能为空")
+	}
+	if c.Email.Port == 0 {
+		return fmt.Errorf("email.port 不能为空")
+	}
+	if c.Email.Username == "" {
+		return fmt.Errorf("email.username 不能为空")
+	}
+	if c.Email.Password == "" {
+		return fmt.Errorf("email.password 不能为空")
+	}
+
+	// Milvus
+	if c.Milvus.Host == "" {
+		return fmt.Errorf("milvus.host 不能为空")
+	}
+	if c.Milvus.Port == 0 {
+		return fmt.Errorf("milvus.port 不能为空")
+	}
+
+	// External - MarkItDown
+	if c.External.MarkItDown.URL == "" {
+		return fmt.Errorf("external.markitdown.url 不能为空")
+	}
+
+	// External - MinIO
+	if c.External.MinIO.Endpoint == "" {
+		return fmt.Errorf("external.minio.endpoint 不能为空")
+	}
+	if c.External.MinIO.AccessKey == "" {
+		return fmt.Errorf("external.minio.access_key 不能为空")
+	}
+	if c.External.MinIO.SecretKey == "" {
+		return fmt.Errorf("external.minio.secret_key 不能为空")
+	}
+	if c.External.MinIO.Bucket == "" {
+		return fmt.Errorf("external.minio.bucket 不能为空")
+	}
+
+	// External - Youdao
+	if c.External.Youdao.CLIPath == "" {
+		return fmt.Errorf("external.youdao.cli_path 不能为空")
+	}
+
+	return nil
+}
+
 // Config 应用配置结构体
 type Config struct {
 	App      AppConfig      `mapstructure:"app"`

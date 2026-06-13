@@ -58,6 +58,11 @@ func Load(configPath string) (*Config, error) {
 		config.Email.From = config.Email.Username
 	}
 
+	// 校验所有必填配置项
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("配置校验失败: %w", err)
+	}
+
 	globalConfig = config
 	return config, nil
 }

@@ -124,17 +124,16 @@ func (a *App) initDatabase() error {
 		&entity.Source{},
 		&entity.ParentBlock{},
 		&entity.UserConfig{},
-		&entity.UserLLMConfig{},
 		&entity.YoudaoBinding{},
 		&entity.SysConfig{},
 	); err != nil {
-		logger.Warn("database migration failed", zap.Error(err))
+		return fmt.Errorf("database migration failed: %w", err)
 	}
 
-	// 初始化 Redis（可选）
+	// 初始化 Redis
 	rs, err := database.InitRedis(&a.cfg.Database.Redis)
 	if err != nil {
-		logger.Warn("init redis failed, continue without redis", zap.Error(err))
+		return fmt.Errorf("init redis failed: %w", err)
 	}
 	a.redis = rs
 
@@ -149,7 +148,6 @@ func (a *App) initDependencies() {
 	sourceRepo := repository.NewSourceRepository(a.mysqlDB)
 	sysConfigRepo := repository.NewSysConfigRepository(a.mysqlDB)
 	userConfigRepo := repository.NewUserConfigRepository(a.mysqlDB)
-	llmConfigRepo := repository.NewUserLLMConfigRepository(a.mysqlDB)
 	conversationRepo := repository.NewConversationRepository(a.mysqlDB)
 	messageRepo := repository.NewMessageRepository(a.mysqlDB)
 
@@ -176,11 +174,8 @@ func (a *App) initDependencies() {
 	sourceSvc := service.NewSourceService(sourceRepo, minioStorage)
 	adminSvc := service.NewAdminService(userRepo, sysConfigRepo, nil)
 
-	// 创建缓存（Redis 可选）
-	var redisCache *cache.Cache
-	if a.redis != nil {
-		redisCache = cache.New(a.redis)
-	}
+	// 创建缓存
+	redisCache := cache.New(a.redis)
 	importTaskCache := cache.NewImportTaskCache(redisCache)
 	audioPreviewCache := cache.NewAudioPreviewCache(redisCache)
 
@@ -189,9 +184,6 @@ func (a *App) initDependencies() {
 
 	// 创建 IngestionService（向量入库）
 	ingestionSvc := a.initIngestionService(sourceRepo, configSvc)
-	if ingestionSvc == nil {
-		logger.Warn("ingestion service unavailable, vector ingestion disabled")
-	}
 
 	// 创建导入服务（ASR 通过 ConfigService 动态获取，RAG 通过 IngestionService）
 	importerSvc := service.NewImporterService(
@@ -201,41 +193,37 @@ func (a *App) initDependencies() {
 	)
 
 	// 创建 RAGRetriever
-	var ragRetriever rag.RAGRetriever
-	if ingestionSvc != nil {
-		parentBlockRepo := repository.NewParentBlockRepository(a.mysqlDB)
-		registry := external.GetGlobalRegistry()
-		retrieverEmbedderProvider := func(ctx context.Context, userID uint) (embedding.Embedder, error) {
-			cfg, err := configSvc.GetUserConfig(userID, "embedding")
-			if err != nil {
-				return nil, fmt.Errorf("获取 Embedding 配置失败: %w", err)
-			}
-			if cfg == nil {
-				return nil, fmt.Errorf("请先在设置中配置 Embedding 服务")
-			}
-			return rag.NewEmbedderFromRegistry(ctx, registry, cfg)
-		}
-
-		// 创建独立的 MilvusWriter 用于检索（Milvus 客户端轻量）
-		milvusCtx, milvusCancel := milvusInitContext()
-		milvusWriter, err := rag.NewMilvusWriter(milvusCtx, rag.MilvusIndexerConfig{
-			Address: a.cfg.Milvus.GetAddress(),
-		})
-		milvusCancel()
+	parentBlockRepo := repository.NewParentBlockRepository(a.mysqlDB)
+	registry := external.GetGlobalRegistry()
+	retrieverEmbedderProvider := func(ctx context.Context, userID uint) (embedding.Embedder, error) {
+		cfg, err := configSvc.GetUserConfig(userID, "embedding")
 		if err != nil {
-			logger.Warn("Milvus Writer 初始化失败，RAGRetriever 不可用", zap.Error(err))
-		} else {
-			ragRetriever = rag.NewRAGRetriever(
-				milvusWriter,
-				parentBlockRepo,
-				sourceRepo,
-				retrieverEmbedderProvider,
-				5, // defaultTopK
-			)
-			a.ragRetriever = ragRetriever
-			logger.Info("RAGRetriever 初始化成功")
+			return nil, fmt.Errorf("获取 Embedding 配置失败: %w", err)
 		}
+		if cfg == nil {
+			return nil, fmt.Errorf("请先在设置中配置 Embedding 服务")
+		}
+		return rag.NewEmbedderFromRegistry(ctx, registry, cfg)
 	}
+
+	// 创建独立的 MilvusWriter 用于检索
+	milvusCtx, milvusCancel := milvusInitContext()
+	milvusWriter, err := rag.NewMilvusWriter(milvusCtx, rag.MilvusIndexerConfig{
+		Address: a.cfg.Milvus.GetAddress(),
+	})
+	milvusCancel()
+	if err != nil {
+		logger.Fatal("Milvus Writer 初始化失败", zap.Error(err))
+	}
+	ragRetriever := rag.NewRAGRetriever(
+		milvusWriter,
+		parentBlockRepo,
+		sourceRepo,
+		retrieverEmbedderProvider,
+		5, // defaultTopK
+	)
+	a.ragRetriever = ragRetriever
+	logger.Info("RAGRetriever 初始化成功")
 
 	// 创建用户配置服务
 	userCfgSvc := service.NewUserConfigService(userConfigRepo, configSvc)
@@ -253,17 +241,9 @@ func (a *App) initDependencies() {
 	generationSvc := service.NewGenerationService(a.ragRetriever, nil, nil)
 
 	// 创建 ChatAgentService
-	var chatAgentSvc service.ChatAgentService
-	if a.redis != nil && ragRetriever != nil {
-		chatCache := cache.NewChatCache(a.redis)
-		chatAgentSvc = service.NewChatAgentService(llmConfigRepo, ragRetriever, conversationRepo, messageRepo, chatCache)
-		logger.Info("ChatAgentService 初始化成功")
-	} else {
-		logger.Warn("ChatAgentService 未初始化（Redis 或 ragRetriever 不可用）",
-			zap.Bool("redis_available", a.redis != nil),
-			zap.Bool("rag_retriever_available", ragRetriever != nil),
-		)
-	}
+	chatCache := cache.NewChatCache(a.redis)
+	chatAgentSvc := service.NewChatAgentService(configSvc, ragRetriever, conversationRepo, messageRepo, chatCache)
+	logger.Info("ChatAgentService 初始化成功")
 
 	a.router = api.NewRouter(
 		userSvc,
@@ -295,8 +275,7 @@ func (a *App) initIngestionService(sourceRepo repository.SourceRepository, confi
 		Address: a.cfg.Milvus.GetAddress(),
 	})
 	if err != nil {
-		logger.Warn("init milvus writer failed", zap.Error(err))
-		return nil
+		logger.Fatal("init milvus writer failed", zap.Error(err))
 	}
 
 	// 创建 EmbedderProvider：通过 ConfigService + Registry 创建
