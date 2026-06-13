@@ -39,9 +39,10 @@ RUN apk add --no-cache ca-certificates tzdata curl python3 py3-pip bash libc6-co
 
 # 安装 youdaonote CLI
 RUN curl -fsSL https://artifact.lx.netease.com/download/youdaonote-cli/youdaonote-cli-linux-x64.tar.gz -o /tmp/youdaonote.tar.gz && \
-    tar -xzf /tmp/youdaonote.tar.gz -C /usr/local/bin/ && \
-    rm /tmp/youdaonote.tar.gz && \
-    chmod +x /usr/local/bin/youdaonote
+    tar -xzf /tmp/youdaonote.tar.gz -C /tmp/ && \
+    mv /tmp/linux-x64/youdaonote /usr/local/bin/youdaonote && \
+    chmod +x /usr/local/bin/youdaonote && \
+    rm -rf /tmp/youdaonote.tar.gz /tmp/linux-x64
 
 # 设置时区
 ENV TZ=Asia/Shanghai
