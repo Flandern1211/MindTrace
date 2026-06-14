@@ -115,9 +115,6 @@ ffmpeg.zip
 
 CLAUDE.local.md
 
-
-markitdown_service
-
 # Audio files
 *.wav
 *.mp3

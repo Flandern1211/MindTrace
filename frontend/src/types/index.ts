@@ -172,3 +172,16 @@ export interface UserConfig {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface UserLLMConfig {
+  id: string;
+  userId: string;
+  name: string;
+  provider: string;
+  apiKey: string;
+  apiUrl: string;
+  model: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

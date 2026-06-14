@@ -39,7 +39,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push app
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -50,6 +50,18 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/youdaonote:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push markitdown
+        uses: docker/build-push-action@v6
+        with:
+          context: ./markitdown_service
+          file: ./markitdown_service/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/markitdown:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/markitdown:${{ github.sha }}
+          cache-from: type=gha,scope=markitdown
+          cache-to: type=gha,scope=markitdown,mode=max
 
   # ========== 部署到服务器 ==========
   deploy-staging:
@@ -70,17 +82,26 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cd /home/flandern/youdaonote
+            DEPLOY_DIR="/home/flandern/youdaonotelm"
+
+            # 创建目录（如果不存在）
+            mkdir -p "$DEPLOY_DIR/configs"
+
+            # 更新 docker-compose.yml
+            curl -fsSL "https://raw.githubusercontent.com/Flandern1211/YoudaoNoteLM/develop/docker-compose.yml" -o "$DEPLOY_DIR/docker-compose.yml"
+            echo "✅ docker-compose.yml updated"
+
+            cd "$DEPLOY_DIR"
 
             # Docker Hub 登录
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
             # 拉取最新镜像
-            docker compose pull app
-            echo "✅ Image pulled"
+            docker compose pull
+            echo "✅ Images pulled"
 
-            # 重启服务（只重建 app 容器）
-            docker compose up -d app
+            # 重启所有服务
+            docker compose up -d
             echo "✅ Services restarted"
 
             # 等待启动
@@ -130,7 +151,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push app
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -142,6 +163,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build and push markitdown
+        uses: docker/build-push-action@v6
+        with:
+          context: ./markitdown_service
+          file: ./markitdown_service/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/markitdown:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/markitdown:${{ github.sha }}
+          cache-from: type=gha,scope=markitdown
+          cache-to: type=gha,scope=markitdown,mode=max
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -150,17 +183,26 @@ jobs:
           key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cd /home/flandern/youdaonote
+            DEPLOY_DIR="/home/flandern/youdaonotelm"
+
+            # 创建目录（如果不存在）
+            mkdir -p "$DEPLOY_DIR/configs"
+
+            # 更新 docker-compose.yml
+            curl -fsSL "https://raw.githubusercontent.com/Flandern1211/YoudaoNoteLM/develop/docker-compose.yml" -o "$DEPLOY_DIR/docker-compose.yml"
+            echo "✅ docker-compose.yml updated"
+
+            cd "$DEPLOY_DIR"
 
             # Docker Hub 登录
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
             # 拉取最新镜像
-            docker compose pull app
-            echo "✅ Image pulled"
+            docker compose pull
+            echo "✅ Images pulled"
 
-            # 重启服务（只重建 app 容器）
-            docker compose up -d app
+            # 重启所有服务
+            docker compose up -d
             echo "✅ Services restarted"
 
             # 等待启动

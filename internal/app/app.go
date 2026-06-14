@@ -124,6 +124,7 @@ func (a *App) initDatabase() error {
 		&entity.Source{},
 		&entity.ParentBlock{},
 		&entity.UserConfig{},
+		&entity.UserLLMConfig{},
 		&entity.YoudaoBinding{},
 		&entity.SysConfig{},
 	); err != nil {
@@ -148,6 +149,7 @@ func (a *App) initDependencies() {
 	sourceRepo := repository.NewSourceRepository(a.mysqlDB)
 	sysConfigRepo := repository.NewSysConfigRepository(a.mysqlDB)
 	userConfigRepo := repository.NewUserConfigRepository(a.mysqlDB)
+	llmConfigRepo := repository.NewUserLLMConfigRepository(a.mysqlDB)
 	conversationRepo := repository.NewConversationRepository(a.mysqlDB)
 	messageRepo := repository.NewMessageRepository(a.mysqlDB)
 
@@ -178,7 +180,7 @@ func (a *App) initDependencies() {
 	audioPreviewCache := cache.NewAudioPreviewCache(redisCache)
 
 	// 创建 ConfigService（配置路由降级，管理 ASR/Search/LLM/Embedding 等动态服务）
-	configSvc := service.NewConfigService(sysConfigRepo, userConfigRepo, redisCache, minioStorage)
+	configSvc := service.NewConfigService(sysConfigRepo, userConfigRepo, llmConfigRepo, redisCache, minioStorage)
 
 	// 创建 IngestionService（向量入库）
 	ingestionSvc := a.initIngestionService(sourceRepo, configSvc)
@@ -228,7 +230,7 @@ func (a *App) initDependencies() {
 	logger.Info("RAGRetriever 初始化成功")
 
 	// 创建用户配置服务
-	userCfgSvc := service.NewUserConfigService(userConfigRepo, configSvc)
+	userCfgSvc := service.NewUserConfigService(userConfigRepo, llmConfigRepo, configSvc)
 
 	// 创建搜索 Agent
 	searchAgentInst := searchAgent.NewSearchAgent(configSvc, importerSvc)
@@ -244,9 +246,11 @@ func (a *App) initDependencies() {
 
 	// 创建 ChatAgentService 和 ConversationService
 	chatCache := cache.NewChatCache(a.redis)
-	chatAgentSvc := service.NewChatAgentService(configSvc, ragRetriever, conversationRepo, messageRepo, chatCache)
+	chatAgentSvc := service.NewChatAgentService(llmConfigRepo, ragRetriever, conversationRepo, messageRepo, chatCache)
 	convSvc := service.NewConversationService(conversationRepo, messageRepo, chatCache)
-	logger.Info("ChatAgentService 和 ConversationService 初始化成功")
+	logger.Info("ChatAgentService 初始化成功")
+	logger.Info("ConversationService 初始化成功")
+
 
 	a.router = api.NewRouter(
 		userSvc,

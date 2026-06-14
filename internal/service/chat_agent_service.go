@@ -31,7 +31,7 @@ import (
 
 // chatAgentService Agent 对话服务实现
 type chatAgentService struct {
-	configSvc        ConfigService
+	llmConfigRepo    repository.UserLLMConfigRepository
 	retriever        rag.RAGRetriever
 	conversationRepo repository.ConversationRepository
 	messageRepo      repository.MessageRepository
@@ -41,14 +41,14 @@ type chatAgentService struct {
 
 // NewChatAgentService 创建 Agent 对话服务
 func NewChatAgentService(
-	configSvc ConfigService,
+	llmConfigRepo repository.UserLLMConfigRepository,
 	retriever rag.RAGRetriever,
 	conversationRepo repository.ConversationRepository,
 	messageRepo repository.MessageRepository,
 	chatCache *cache.ChatCache,
 ) ChatAgentService {
 	return &chatAgentService{
-		configSvc:        configSvc,
+		llmConfigRepo:    llmConfigRepo,
 		retriever:        retriever,
 		conversationRepo: conversationRepo,
 		messageRepo:      messageRepo,
@@ -123,7 +123,7 @@ func (s *chatAgentService) processWithAgentAsync(ctx context.Context, conversati
 
 	// 2. 获取用户的 LLM 配置
 	logger.Info("[Agent] 步骤1: 获取用户 LLM 配置")
-	llmConfig, err := s.configSvc.GetUserConfig(req.UserID, "llm")
+	llmConfig, err := s.llmConfigRepo.FindDefaultByUserID(req.UserID)
 	if err != nil || llmConfig == nil {
 		logger.Error("[Agent] 获取 LLM 配置失败", zap.Error(err))
 		s.sendAgentError(eventCh, "获取 AI 配置失败，请先在设置中配置 LLM 服务")
@@ -539,7 +539,7 @@ func (s *chatAgentService) generateAndUpdateTitle(ctx context.Context, conversat
 
 // getChatModel 获取用户的 ChatModel
 func (s *chatAgentService) getChatModel(ctx context.Context, userID uint) (*model.ChatModel, error) {
-	cfg, err := s.configSvc.GetUserConfig(userID, "llm")
+	cfg, err := s.llmConfigRepo.FindDefaultByUserID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户 LLM 配置失败: %w", err)
 	}

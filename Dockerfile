@@ -35,10 +35,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o server ./
 FROM nginx:alpine
 
 # 安装运行时依赖
-RUN apk add --no-cache ca-certificates tzdata curl python3 py3-pip bash
+RUN apk add --no-cache ca-certificates tzdata curl python3 py3-pip bash libc6-compat
 
 # 安装 youdaonote CLI
-RUN curl -fsSL https://artifact.lx.netease.com/download/youdaonote-cli/install.sh | bash
+RUN curl -fsSL https://artifact.lx.netease.com/download/youdaonote-cli/youdaonote-cli-linux-x64.tar.gz -o /tmp/youdaonote.tar.gz && \
+    tar -xzf /tmp/youdaonote.tar.gz -C /tmp/ && \
+    mv /tmp/linux-x64/youdaonote /usr/local/bin/youdaonote && \
+    chmod +x /usr/local/bin/youdaonote && \
+    rm -rf /tmp/youdaonote.tar.gz /tmp/linux-x64
 
 # 设置时区
 ENV TZ=Asia/Shanghai

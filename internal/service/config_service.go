@@ -56,6 +56,7 @@ type ConfigService interface {
 type configService struct {
 	sysConfigRepo  repository.SysConfigRepository
 	userConfigRepo repository.UserConfigRepository
+	llmConfigRepo  repository.UserLLMConfigRepository
 	cache          CacheStore
 	storage        storage.FileStorage // ASR 需要注入存储服务
 	registry       *external.Registry  // Provider 注册表
@@ -64,12 +65,14 @@ type configService struct {
 func NewConfigService(
 	sysConfigRepo repository.SysConfigRepository,
 	userConfigRepo repository.UserConfigRepository,
+	llmConfigRepo repository.UserLLMConfigRepository,
 	cache CacheStore,
 	storage storage.FileStorage,
 ) ConfigService {
 	return &configService{
 		sysConfigRepo:  sysConfigRepo,
 		userConfigRepo: userConfigRepo,
+		llmConfigRepo:  llmConfigRepo,
 		cache:          cache,
 		storage:        storage,
 		registry:       external.GetGlobalRegistry(), // 使用全局 Registry
@@ -435,18 +438,28 @@ func (s *configService) GetChatModelConfig(userID uint) (*ChatModelConfig, error
 
 	// 1. 查用户 LLM 配置（先查缓存）
 	cacheKey := userConfigCacheKey(userID, "llm")
-	var userCfg entity.UserConfig
+	var userCfg entity.UserLLMConfig
 	if err := s.cache.Get(ctx, cacheKey, &userCfg); err == nil && userCfg.Enabled {
-		return s.buildChatModelConfig(userCfg.Provider, userCfg.APIURL, userCfg.APIKey, userCfg.Model, userCfg.ExtraConfig)
+		return &ChatModelConfig{
+			Provider: userCfg.Provider,
+			BaseURL:  userCfg.APIURL,
+			APIKey:   userCfg.APIKey,
+			Model:    userCfg.Model,
+		}, nil
 	}
 
-	// 缓存未命中，查 DB
-	userCfgPtr, err := s.userConfigRepo.FindByUserAndType(userID, "llm")
+	// 缓存未命中，查 DB（user_llm_config 表）
+	userCfgPtr, err := s.llmConfigRepo.FindDefaultByUserID(userID)
 	if err == nil && userCfgPtr != nil && userCfgPtr.Enabled {
 		if cacheErr := s.cache.Set(ctx, cacheKey, userCfgPtr, userConfigTTL); cacheErr != nil {
 			logger.Warn("缓存用户LLM配置失败", zap.String("key", cacheKey), zap.Error(cacheErr))
 		}
-		return s.buildChatModelConfig(userCfgPtr.Provider, userCfgPtr.APIURL, userCfgPtr.APIKey, userCfgPtr.Model, userCfgPtr.ExtraConfig)
+		return &ChatModelConfig{
+			Provider: userCfgPtr.Provider,
+			BaseURL:  userCfgPtr.APIURL,
+			APIKey:   userCfgPtr.APIKey,
+			Model:    userCfgPtr.Model,
+		}, nil
 	}
 
 	// 2. 降级到系统内置配置
