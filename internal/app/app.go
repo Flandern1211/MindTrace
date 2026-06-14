@@ -57,17 +57,12 @@ func NewApp() *App {
 
 // Initialize 初始化应用依赖。
 func (a *App) Initialize() error {
-	// 1. 加载配置
 	if err := a.initConfig(); err != nil {
 		return err
 	}
-
-	// 2. 初始化日志
 	if err := a.initLogger(); err != nil {
 		return err
 	}
-
-	// 3. 初始化数据库
 	if err := a.initDatabase(); err != nil {
 		return err
 	}
@@ -128,13 +123,13 @@ func (a *App) initDatabase() error {
 		&entity.YoudaoBinding{},
 		&entity.SysConfig{},
 	); err != nil {
-		return fmt.Errorf("database migration failed: %w", err)
+		logger.Warn("database migration failed", zap.Error(err))
 	}
 
-	// 初始化 Redis
+	// 初始化 Redis（可选）
 	rs, err := database.InitRedis(&a.cfg.Database.Redis)
 	if err != nil {
-		return fmt.Errorf("init redis failed: %w", err)
+		logger.Warn("init redis failed, continue without redis", zap.Error(err))
 	}
 	a.redis = rs
 
@@ -161,9 +156,7 @@ func (a *App) initDependencies() {
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
-	if err != nil {
-		logger.Fatal("MinIO 初始化失败", zap.Error(err))
-	}
+	bochaClient := external.NewBochaSearchClient(&http.Client{}, a.cfg.External.Bocha.Endpoint)
 
 	// 创建 Service
 	emailSvc := service.NewEmailService()
@@ -252,7 +245,7 @@ func (a *App) initDependencies() {
 		authSvc,
 		notebookSvc,
 		sourceSvc,
-		nil, // searchService 暂为 nil
+		searchSvc,
 		generationSvc,
 		importerSvc,
 		adminSvc,
@@ -267,8 +260,8 @@ func (a *App) initDependencies() {
 }
 
 // initIngestionService 初始化入库服务
-// 通过 ConfigService + Registry 创建 Embedder，支持所有已注册的 embedding provider
-func (a *App) initIngestionService(sourceRepo repository.SourceRepository, configSvc service.ConfigService) rag.IngestionService {
+// 从数据库读取用户的 Embedding 配置，创建 EmbedderProvider 和 MilvusWriter
+func (a *App) initIngestionService(sourceRepo repository.SourceRepository) rag.IngestionService {
 	ctx, cancel := milvusInitContext()
 	defer cancel()
 
@@ -277,7 +270,8 @@ func (a *App) initIngestionService(sourceRepo repository.SourceRepository, confi
 		Address: a.cfg.Milvus.GetAddress(),
 	})
 	if err != nil {
-		logger.Fatal("init milvus writer failed", zap.Error(err))
+		logger.Warn("init milvus writer failed", zap.Error(err))
+		return nil
 	}
 
 	// 创建 EmbedderProvider：通过 ConfigService + Registry 创建
