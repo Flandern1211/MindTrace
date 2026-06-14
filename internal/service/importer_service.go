@@ -99,6 +99,11 @@ func (s *importerService) ImportFile(userID, notebookID uint, file *multipart.Fi
 	// 上传到 MinIO 存储
 	filePath, err := s.storage.Upload(file)
 	if err != nil {
+		logger.Error("文件上传到存储服务失败",
+			zap.String("file", file.Filename),
+			zap.Int64("size", file.Size),
+			zap.Error(err),
+		)
 		return nil, bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "文件上传失败", err)
 	}
 
@@ -153,6 +158,11 @@ func (s *importerService) PreviewAudio(userID, notebookID uint, file *multipart.
 	// 上传原始文件到 MinIO
 	filePath, err := s.storage.Upload(file)
 	if err != nil {
+		logger.Error("音频上传到存储服务失败",
+			zap.String("file", file.Filename),
+			zap.Int64("size", file.Size),
+			zap.Error(err),
+		)
 		return "", "", bizerrors.NewWithErr(bizerrors.CodeInternalServiceError, "音频上传失败", err)
 	}
 

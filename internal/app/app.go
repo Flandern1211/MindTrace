@@ -156,6 +156,9 @@ func (a *App) initDependencies() {
 		a.cfg.External.MinIO.SecretKey,
 		a.cfg.External.MinIO.Bucket,
 	)
+	if err != nil {
+		logger.Fatal("MinIO 初始化失败，文件上传功能将不可用", zap.Error(err))
+	}
 	bochaClient := external.NewBochaSearchClient(&http.Client{}, a.cfg.External.Bocha.Endpoint)
 
 	// 创建 Service
@@ -227,8 +230,11 @@ func (a *App) initDependencies() {
 	searchAgentInst := searchAgent.NewSearchAgent(configSvc, importerSvc)
 	searchAgentSvc := service.NewSearchAgentService(configSvc, importerSvc, searchAgentInst)
 
-	// 创建有道云笔记服务
+	// 创建有道云笔记服务（CLI 不可用时仅打 warning，不影响启动）
 	youdaoCLI := externalYoudao.NewCLI(a.cfg.External.Youdao.CLIPath, a.cfg.External.Youdao.ConverterScriptPath)
+	if err := youdaoCLI.CheckAvailable(); err != nil {
+		logger.Warn("youdaonote CLI 不可用，有道云笔记导入功能将无法使用", zap.Error(err))
+	}
 	youdaoBindingRepo := repository.NewYoudaoBindingRepository(a.mysqlDB)
 	youdaoSvc := service.NewYoudaoService(youdaoCLI, youdaoBindingRepo, sourceRepo, ingestionSvc, a.cfg.External.Youdao.CookiesPath)
 

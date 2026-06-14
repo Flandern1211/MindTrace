@@ -88,11 +88,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("external.minio.bucket 不能为空")
 	}
 
-	// External - Youdao
-	if c.External.Youdao.CLIPath == "" {
-		return fmt.Errorf("external.youdao.cli_path 不能为空")
-	}
-
 	return nil
 }
 
